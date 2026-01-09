@@ -187,13 +187,28 @@ async function run() {
 		: packageName
 	const repoName = await question('Repository name', defaultRepoName)
 
-	// Try to detect GitHub user from git config
+	// Try to detect GitHub username from gh CLI first, fallback to git config
 	let defaultGithubUser = ''
 	try {
-		const result = Bun.spawnSync(['git', 'config', 'user.name'])
-		defaultGithubUser = new TextDecoder().decode(result.stdout).trim()
+		// Prefer gh CLI for actual GitHub username
+		const ghResult = Bun.spawnSync(['gh', 'api', 'user', '--jq', '.login'], {
+			stdout: 'pipe',
+			stderr: 'pipe',
+		})
+		if (ghResult.exitCode === 0) {
+			defaultGithubUser = new TextDecoder().decode(ghResult.stdout).trim()
+		}
 	} catch {
 		// Ignore
+	}
+	// Fallback to git config user.name if gh didn't work
+	if (!defaultGithubUser) {
+		try {
+			const result = Bun.spawnSync(['git', 'config', 'user.name'])
+			defaultGithubUser = new TextDecoder().decode(result.stdout).trim()
+		} catch {
+			// Ignore
+		}
 	}
 	const githubUser = await question('GitHub username/org', defaultGithubUser)
 
