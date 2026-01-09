@@ -325,7 +325,12 @@ async function run() {
 						'--description',
 						description,
 					],
-					{ stdout: 'inherit', stderr: 'inherit' },
+					{
+						stdout: 'inherit',
+						stderr: 'inherit',
+						// Allow push to main during initial setup (bypasses husky pre-push hook)
+						env: { ...process.env, ALLOW_PUSH_PROTECTED: '1' },
+					},
 				)
 
 				if (createResult.exitCode !== 0) {
@@ -364,6 +369,8 @@ async function run() {
 					{
 						stdout: 'inherit',
 						stderr: 'inherit',
+						// Allow push to main during initial setup (bypasses husky pre-push hook)
+						env: { ...process.env, ALLOW_PUSH_PROTECTED: '1' },
 					},
 				)
 
