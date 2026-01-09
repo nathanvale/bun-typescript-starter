@@ -46,22 +46,25 @@ async function configureGitHub(
 
 	// 1. Configure repo settings (squash merge only, delete branch on merge, auto-merge)
 	console.log('  Setting merge options (squash only, auto-delete branches)...')
-	const repoSettings = runGh([
-		'api',
-		`repos/${repo}`,
-		'--method',
-		'PATCH',
-		'-f',
-		'allow_squash_merge=true',
-		'-f',
-		'allow_merge_commit=false',
-		'-f',
-		'allow_rebase_merge=false',
-		'-f',
-		'delete_branch_on_merge=true',
-		'-f',
-		'allow_auto_merge=true',
-	])
+	const repoSettings = runGh(
+		[
+			'api',
+			`repos/${repo}`,
+			'--method',
+			'PATCH',
+			'-f',
+			'allow_squash_merge=true',
+			'-f',
+			'allow_merge_commit=false',
+			'-f',
+			'allow_rebase_merge=false',
+			'-f',
+			'delete_branch_on_merge=true',
+			'-f',
+			'allow_auto_merge=true',
+		],
+		true,
+	)
 	if (!repoSettings) {
 		console.log('  ⚠️  Could not configure repo settings')
 	}
