@@ -10,12 +10,119 @@
  * 2. Replaces placeholders in config files
  * 3. Installs dependencies
  * 4. Creates initial commit
- * 5. Prints next steps
+ * 5. Optionally creates GitHub repo with branch protection
+ * 6. Prints next steps
  */
 
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+
+/** Check if GitHub CLI is installed and authenticated */
+function hasGitHubCLI(): boolean {
+	const result = Bun.spawnSync(['gh', 'auth', 'status'], {
+		stdout: 'pipe',
+		stderr: 'pipe',
+	})
+	return result.exitCode === 0
+}
+
+/** Run a gh CLI command and return success status */
+function runGh(args: string[], silent = false): boolean {
+	const result = Bun.spawnSync(['gh', ...args], {
+		stdout: silent ? 'pipe' : 'inherit',
+		stderr: silent ? 'pipe' : 'inherit',
+	})
+	return result.exitCode === 0
+}
+
+/** Configure GitHub repository settings to match Chatline standards */
+async function configureGitHub(
+	githubUser: string,
+	repoName: string,
+): Promise<boolean> {
+	const repo = `${githubUser}/${repoName}`
+	console.log('\n🔧 Configuring GitHub repository...\n')
+
+	// 1. Configure repo settings (squash merge only, delete branch on merge, auto-merge)
+	console.log('  Setting merge options (squash only, auto-delete branches)...')
+	const repoSettings = runGh([
+		'api',
+		`repos/${repo}`,
+		'--method',
+		'PATCH',
+		'-f',
+		'allow_squash_merge=true',
+		'-f',
+		'allow_merge_commit=false',
+		'-f',
+		'allow_rebase_merge=false',
+		'-f',
+		'delete_branch_on_merge=true',
+		'-f',
+		'allow_auto_merge=true',
+	])
+	if (!repoSettings) {
+		console.log('  ⚠️  Could not configure repo settings')
+	}
+
+	// 2. Configure branch protection for main
+	console.log('  Setting branch protection rules...')
+
+	// The protection rules need to be sent as JSON input
+	const protectionPayload = JSON.stringify({
+		required_status_checks: {
+			strict: true,
+			contexts: ['All checks passed'],
+		},
+		enforce_admins: true,
+		required_pull_request_reviews: {
+			dismiss_stale_reviews: true,
+			require_code_owner_reviews: false,
+			required_approving_review_count: 0,
+		},
+		restrictions: null,
+		required_linear_history: true,
+		allow_force_pushes: false,
+		allow_deletions: false,
+	})
+
+	// Run with stdin input for JSON payload
+	const protectionResult = Bun.spawnSync(
+		[
+			'gh',
+			'api',
+			`repos/${repo}/branches/main/protection`,
+			'--method',
+			'PUT',
+			'-H',
+			'Accept: application/vnd.github+json',
+			'--input',
+			'-',
+		],
+		{
+			stdin: new TextEncoder().encode(protectionPayload),
+			stdout: 'pipe',
+			stderr: 'pipe',
+		},
+	)
+
+	if (protectionResult.exitCode !== 0) {
+		const stderr = new TextDecoder().decode(protectionResult.stderr)
+		if (stderr.includes('Not Found')) {
+			console.log(
+				'  ⚠️  Branch protection requires pushing code first (main branch must exist)',
+			)
+			return false
+		}
+		console.log('  ⚠️  Could not configure branch protection')
+		console.log(`     ${stderr}`)
+		return false
+	}
+
+	console.log('  ✅ GitHub repository configured!')
+	return true
+}
 
 const rl = createInterface({
 	input: process.stdin,
@@ -23,7 +130,9 @@ const rl = createInterface({
 })
 
 function question(prompt: string, defaultValue?: string): Promise<string> {
-	const displayPrompt = defaultValue ? `${prompt} [${defaultValue}]: ` : `${prompt}: `
+	const displayPrompt = defaultValue
+		? `${prompt} [${defaultValue}]: `
+		: `${prompt}: `
 	return new Promise((resolve) => {
 		rl.question(displayPrompt, (answer) => {
 			resolve(answer.trim() || defaultValue || '')
@@ -31,7 +140,10 @@ function question(prompt: string, defaultValue?: string): Promise<string> {
 	})
 }
 
-function replaceInFile(filePath: string, replacements: Record<string, string>): void {
+function replaceInFile(
+	filePath: string,
+	replacements: Record<string, string>,
+): void {
 	if (!existsSync(filePath)) {
 		console.log(`  Skipping ${filePath} (not found)`)
 		return
@@ -85,7 +197,10 @@ async function run() {
 	}
 	const githubUser = await question('GitHub username/org', defaultGithubUser)
 
-	const description = await question('Project description', 'A TypeScript library')
+	const description = await question(
+		'Project description',
+		'A TypeScript library',
+	)
 
 	const author = await question('Author name', defaultGithubUser)
 
@@ -157,22 +272,139 @@ async function run() {
 		console.log('  Created initial commit')
 	}
 
+	// GitHub setup (optional - requires gh CLI)
+	let githubConfigured = false
+	if (hasGitHubCLI()) {
+		const setupGitHub = await question(
+			'\nCreate GitHub repo and configure settings? (Y/n)',
+			'y',
+		)
+		if (setupGitHub.toLowerCase() !== 'n') {
+			console.log('\n🌐 Setting up GitHub repository...\n')
+
+			// Check if repo already exists
+			const repoExists = Bun.spawnSync(
+				['gh', 'repo', 'view', `${githubUser}/${repoName}`],
+				{ stdout: 'pipe', stderr: 'pipe' },
+			)
+
+			if (repoExists.exitCode !== 0) {
+				// Create the repo
+				console.log(`  Creating repository ${githubUser}/${repoName}...`)
+				const createResult = Bun.spawnSync(
+					[
+						'gh',
+						'repo',
+						'create',
+						`${githubUser}/${repoName}`,
+						'--public',
+						'--source=.',
+						'--push',
+						'--description',
+						description,
+					],
+					{ stdout: 'inherit', stderr: 'inherit' },
+				)
+
+				if (createResult.exitCode !== 0) {
+					console.log('  ⚠️  Could not create GitHub repository')
+					console.log('     You can create it manually and push later.')
+				} else {
+					console.log('  ✅ Repository created and code pushed!')
+					// Now configure the repo settings and branch protection
+					githubConfigured = await configureGitHub(githubUser, repoName)
+				}
+			} else {
+				// Repo exists, just set remote and push
+				console.log('  Repository already exists, pushing code...')
+
+				// Check if origin remote exists
+				const remoteResult = Bun.spawnSync(
+					['git', 'remote', 'get-url', 'origin'],
+					{
+						stdout: 'pipe',
+						stderr: 'pipe',
+					},
+				)
+
+				if (remoteResult.exitCode !== 0) {
+					Bun.spawnSync([
+						'git',
+						'remote',
+						'add',
+						'origin',
+						`git@github.com:${githubUser}/${repoName}.git`,
+					])
+				}
+
+				const pushResult = Bun.spawnSync(
+					['git', 'push', '-u', 'origin', 'main'],
+					{
+						stdout: 'inherit',
+						stderr: 'inherit',
+					},
+				)
+
+				if (pushResult.exitCode === 0) {
+					console.log('  ✅ Code pushed!')
+					githubConfigured = await configureGitHub(githubUser, repoName)
+				} else {
+					console.log('  ⚠️  Could not push to GitHub')
+				}
+			}
+		}
+	} else {
+		console.log(
+			'\n💡 Tip: Install GitHub CLI (gh) to auto-configure repo settings',
+		)
+		console.log('   brew install gh && gh auth login')
+	}
+
 	// Print next steps
 	console.log('\n✅ Setup complete!\n')
-	console.log('📋 Next steps:\n')
-	console.log('  1. Push to GitHub:')
-	console.log(`     git remote add origin https://github.com/${githubUser}/${repoName}.git`)
-	console.log('     git push -u origin main\n')
-	console.log('  2. Configure branch protection:')
-	console.log(`     https://github.com/${githubUser}/${repoName}/settings/branches\n`)
-	console.log('  3. For npm publishing (first time):')
-	console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
-	console.log('     - After first publish, configure OIDC trusted publishing at:')
-	console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
-	console.log('  4. Start coding:')
-	console.log('     bun dev          # Watch mode')
-	console.log('     bun test         # Run tests')
-	console.log('     bun run build    # Build for production\n')
+
+	if (githubConfigured) {
+		console.log('📋 Next steps:\n')
+		console.log('  1. For npm publishing (first time):')
+		console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
+		console.log(
+			'     - After first publish, configure OIDC trusted publishing at:',
+		)
+		console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
+		console.log('  2. Start coding:')
+		console.log('     bun dev          # Watch mode')
+		console.log('     bun test         # Run tests')
+		console.log('     bun run build    # Build for production\n')
+	} else {
+		console.log('📋 Next steps:\n')
+		console.log('  1. Push to GitHub:')
+		console.log(
+			`     git remote add origin git@github.com:${githubUser}/${repoName}.git`,
+		)
+		console.log('     git push -u origin main\n')
+		console.log('  2. Configure branch protection:')
+		console.log(
+			`     https://github.com/${githubUser}/${repoName}/settings/branches`,
+		)
+		console.log('     - Enable "Require pull request before merging"')
+		console.log('     - Enable "Require status checks to pass"')
+		console.log('     - Enable "Require linear history"\n')
+		console.log('  3. Configure repo settings:')
+		console.log(`     https://github.com/${githubUser}/${repoName}/settings`)
+		console.log('     - Allow squash merging only')
+		console.log('     - Enable "Automatically delete head branches"')
+		console.log('     - Enable "Allow auto-merge"\n')
+		console.log('  4. For npm publishing (first time):')
+		console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
+		console.log(
+			'     - After first publish, configure OIDC trusted publishing at:',
+		)
+		console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
+		console.log('  5. Start coding:')
+		console.log('     bun dev          # Watch mode')
+		console.log('     bun test         # Run tests')
+		console.log('     bun run build    # Build for production\n')
+	}
 
 	rl.close()
 }
