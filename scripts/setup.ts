@@ -36,11 +36,21 @@ function runGh(args: string[], silent = false): boolean {
 	return result.exitCode === 0
 }
 
+/** Set a GitHub repository secret */
+function setRepoSecret(repo: string, name: string, value: string): boolean {
+	const result = Bun.spawnSync(['gh', 'secret', 'set', name, '--repo', repo], {
+		stdin: new TextEncoder().encode(value),
+		stdout: 'pipe',
+		stderr: 'pipe',
+	})
+	return result.exitCode === 0
+}
+
 /** Configure GitHub repository settings to match Chatline standards */
 async function configureGitHub(
 	githubUser: string,
 	repoName: string,
-): Promise<boolean> {
+): Promise<{ success: boolean; npmTokenConfigured: boolean } | false> {
 	const repo = `${githubUser}/${repoName}`
 	console.log('\n🔧 Configuring GitHub repository...\n')
 
@@ -120,8 +130,25 @@ async function configureGitHub(
 		return false
 	}
 
+	// 3. Set NPM_TOKEN secret if available in environment
+	let npmTokenConfigured = false
+	const npmToken = process.env.NPM_TOKEN
+	if (npmToken) {
+		console.log('  Setting NPM_TOKEN secret (found in environment)...')
+		if (setRepoSecret(repo, 'NPM_TOKEN', npmToken)) {
+			console.log('  ✅ NPM_TOKEN secret configured!')
+			npmTokenConfigured = true
+		} else {
+			console.log('  ⚠️  Could not set NPM_TOKEN secret')
+		}
+	} else {
+		console.log('  ℹ️  NPM_TOKEN not found in environment - skipping')
+		console.log('     Add it manually for npm publishing:')
+		console.log(`     gh secret set NPM_TOKEN --repo ${repo}`)
+	}
+
 	console.log('  ✅ GitHub repository configured!')
-	return true
+	return { success: true, npmTokenConfigured }
 }
 
 const rl = createInterface({
@@ -274,6 +301,7 @@ async function run() {
 
 	// GitHub setup (optional - requires gh CLI)
 	let githubConfigured = false
+	let npmTokenConfigured = false
 	if (hasGitHubCLI()) {
 		const setupGitHub = await question(
 			'\nCreate GitHub repo and configure settings? (Y/n)',
@@ -312,7 +340,11 @@ async function run() {
 				} else {
 					console.log('  ✅ Repository created and code pushed!')
 					// Now configure the repo settings and branch protection
-					githubConfigured = await configureGitHub(githubUser, repoName)
+					const result = await configureGitHub(githubUser, repoName)
+					if (result && typeof result === 'object') {
+						githubConfigured = result.success
+						npmTokenConfigured = result.npmTokenConfigured
+					}
 				}
 			} else {
 				// Repo exists, just set remote and push
@@ -347,7 +379,11 @@ async function run() {
 
 				if (pushResult.exitCode === 0) {
 					console.log('  ✅ Code pushed!')
-					githubConfigured = await configureGitHub(githubUser, repoName)
+					const result = await configureGitHub(githubUser, repoName)
+					if (result && typeof result === 'object') {
+						githubConfigured = result.success
+						npmTokenConfigured = result.npmTokenConfigured
+					}
 				} else {
 					console.log('  ⚠️  Could not push to GitHub')
 				}
@@ -363,48 +399,61 @@ async function run() {
 	// Print next steps
 	console.log('\n✅ Setup complete!\n')
 
-	if (githubConfigured) {
-		console.log('📋 Next steps:\n')
-		console.log('  1. For npm publishing (first time):')
-		console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
-		console.log(
-			'     - After first publish, configure OIDC trusted publishing at:',
-		)
-		console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
-		console.log('  2. Start coding:')
-		console.log('     bun dev          # Watch mode')
-		console.log('     bun test         # Run tests')
-		console.log('     bun run build    # Build for production\n')
-	} else {
-		console.log('📋 Next steps:\n')
-		console.log('  1. Push to GitHub:')
-		console.log(
+	const steps: string[] = []
+	let stepNum = 1
+
+	// Only show push instructions if GitHub wasn't configured
+	if (!githubConfigured) {
+		steps.push(`  ${stepNum}. Push to GitHub:`)
+		steps.push(
 			`     git remote add origin git@github.com:${githubUser}/${repoName}.git`,
 		)
-		console.log('     git push -u origin main\n')
-		console.log('  2. Configure branch protection:')
-		console.log(
+		steps.push('     git push -u origin main\n')
+		stepNum++
+
+		steps.push(`  ${stepNum}. Configure branch protection:`)
+		steps.push(
 			`     https://github.com/${githubUser}/${repoName}/settings/branches`,
 		)
-		console.log('     - Enable "Require pull request before merging"')
-		console.log('     - Enable "Require status checks to pass"')
-		console.log('     - Enable "Require linear history"\n')
-		console.log('  3. Configure repo settings:')
-		console.log(`     https://github.com/${githubUser}/${repoName}/settings`)
-		console.log('     - Allow squash merging only')
-		console.log('     - Enable "Automatically delete head branches"')
-		console.log('     - Enable "Allow auto-merge"\n')
-		console.log('  4. For npm publishing (first time):')
-		console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
-		console.log(
+		steps.push('     - Enable "Require pull request before merging"')
+		steps.push('     - Enable "Require status checks to pass"')
+		steps.push('     - Enable "Require linear history"\n')
+		stepNum++
+
+		steps.push(`  ${stepNum}. Configure repo settings:`)
+		steps.push(`     https://github.com/${githubUser}/${repoName}/settings`)
+		steps.push('     - Allow squash merging only')
+		steps.push('     - Enable "Automatically delete head branches"')
+		steps.push('     - Enable "Allow auto-merge"\n')
+		stepNum++
+	}
+
+	// Only show NPM_TOKEN instructions if it wasn't auto-configured
+	if (!npmTokenConfigured) {
+		steps.push(`  ${stepNum}. For npm publishing (first time):`)
+		steps.push(`     gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`)
+		steps.push(
 			'     - After first publish, configure OIDC trusted publishing at:',
 		)
-		console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
-		console.log('  5. Start coding:')
-		console.log('     bun dev          # Watch mode')
-		console.log('     bun test         # Run tests')
-		console.log('     bun run build    # Build for production\n')
+		steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
+		stepNum++
+	} else {
+		steps.push(`  ${stepNum}. For npm publishing:`)
+		steps.push('     - NPM_TOKEN secret already configured!')
+		steps.push(
+			'     - After first publish, configure OIDC trusted publishing at:',
+		)
+		steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
+		stepNum++
 	}
+
+	steps.push(`  ${stepNum}. Start coding:`)
+	steps.push('     bun dev          # Watch mode')
+	steps.push('     bun test         # Run tests')
+	steps.push('     bun run build    # Build for production\n')
+
+	console.log('📋 Next steps:\n')
+	console.log(steps.join('\n'))
 
 	rl.close()
 }
