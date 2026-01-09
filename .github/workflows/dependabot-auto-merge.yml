@@ -1,0 +1,52 @@
+name: Dependabot Auto-Merge
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require dev-dependencies label
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        id: labels
+        with:
+          script: |
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name)
+            const hasDevLabel = labels.includes('dev-dependencies')
+            if (!hasDevLabel) {
+              core.setFailed('PR is not labeled dev-dependencies; skipping auto-merge')
+            }
+      - name: Check changed files for devDependencies only
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        id: diff
+        with:
+          script: |
+            const pr = context.payload.pull_request
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            })
+            const filenames = files.map(f => f.filename)
+            const allowed = [
+              'package.json',
+              'pnpm-lock.yaml',
+              'package-lock.json',
+              'yarn.lock',
+            ]
+            const onlyAllowed = filenames.every(f => allowed.includes(f))
+            if (!onlyAllowed) {
+              core.setFailed('PR touches files outside dependency manifests')
+            }
+      - name: Enable auto-merge for minor/patch dev dependency updates
+        if: steps.diff.outcome == 'success' && steps.labels.outcome == 'success'
+        uses: fastify/github-action-merge-dependabot@1b2ed42db8f9d81a46bac83adedfc03eb5149dff # v3.11.2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          target: minor

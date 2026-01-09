@@ -1,0 +1,51 @@
+name: Node.js Compatibility Check
+
+on:
+  # Verify the built CLI works on Node.js (since Bun is now primary runtime)
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'tsconfig*.json'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  node-compat:
+    name: Node.js Compatibility
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Standard CI Env
+        uses: ./.github/actions/standard-ci-env
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build (TypeScript)
+        run: bun run build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Node.js CLI smoke test
+        run: node ./dist/bin/index.js --help
+
+      - name: Verify ESM imports work on Node.js
+        run: |
+          node -e "import('./dist/index.js').then(m => console.log('ESM import OK, exports:', Object.keys(m)))"

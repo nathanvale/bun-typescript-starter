@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Block direct pushes to protected branches. Use PRs instead.
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
+  echo "Push to protected branch '$current_branch' is blocked."
+  echo "Create a feature branch and open a PR."
+  echo "Override (not recommended): ALLOW_PUSH_PROTECTED=1 git push"
+  if [ "${ALLOW_PUSH_PROTECTED:-}" != "1" ]; then
+    exit 1
+  fi
+fi
