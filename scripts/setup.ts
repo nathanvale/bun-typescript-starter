@@ -306,6 +306,13 @@ async function run() {
 			if (repoExists.exitCode !== 0) {
 				// Create the repo
 				console.log(`  Creating repository ${githubUser}/${repoName}...`)
+
+				// Remove existing origin if present (template clones have origin set)
+				Bun.spawnSync(['git', 'remote', 'remove', 'origin'], {
+					stdout: 'pipe',
+					stderr: 'pipe',
+				})
+
 				const createResult = Bun.spawnSync(
 					[
 						'gh',
