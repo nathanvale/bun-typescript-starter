@@ -36,21 +36,11 @@ function runGh(args: string[], silent = false): boolean {
 	return result.exitCode === 0
 }
 
-/** Set a GitHub repository secret */
-function setRepoSecret(repo: string, name: string, value: string): boolean {
-	const result = Bun.spawnSync(['gh', 'secret', 'set', name, '--repo', repo], {
-		stdin: new TextEncoder().encode(value),
-		stdout: 'pipe',
-		stderr: 'pipe',
-	})
-	return result.exitCode === 0
-}
-
 /** Configure GitHub repository settings to match Chatline standards */
 async function configureGitHub(
 	githubUser: string,
 	repoName: string,
-): Promise<{ success: boolean; npmTokenConfigured: boolean } | false> {
+): Promise<boolean> {
 	const repo = `${githubUser}/${repoName}`
 	console.log('\n🔧 Configuring GitHub repository...\n')
 
@@ -130,25 +120,8 @@ async function configureGitHub(
 		return false
 	}
 
-	// 3. Set NPM_TOKEN secret if available in environment
-	let npmTokenConfigured = false
-	const npmToken = process.env.NPM_TOKEN
-	if (npmToken) {
-		console.log('  Setting NPM_TOKEN secret (found in environment)...')
-		if (setRepoSecret(repo, 'NPM_TOKEN', npmToken)) {
-			console.log('  ✅ NPM_TOKEN secret configured!')
-			npmTokenConfigured = true
-		} else {
-			console.log('  ⚠️  Could not set NPM_TOKEN secret')
-		}
-	} else {
-		console.log('  ℹ️  NPM_TOKEN not found in environment - skipping')
-		console.log('     Add it manually for npm publishing:')
-		console.log(`     gh secret set NPM_TOKEN --repo ${repo}`)
-	}
-
 	console.log('  ✅ GitHub repository configured!')
-	return { success: true, npmTokenConfigured }
+	return true
 }
 
 const rl = createInterface({
@@ -301,7 +274,6 @@ async function run() {
 
 	// GitHub setup (optional - requires gh CLI)
 	let githubConfigured = false
-	let npmTokenConfigured = false
 	if (hasGitHubCLI()) {
 		const setupGitHub = await question(
 			'\nCreate GitHub repo and configure settings? (Y/n)',
@@ -340,11 +312,7 @@ async function run() {
 				} else {
 					console.log('  ✅ Repository created and code pushed!')
 					// Now configure the repo settings and branch protection
-					const result = await configureGitHub(githubUser, repoName)
-					if (result && typeof result === 'object') {
-						githubConfigured = result.success
-						npmTokenConfigured = result.npmTokenConfigured
-					}
+					githubConfigured = await configureGitHub(githubUser, repoName)
 				}
 			} else {
 				// Repo exists, just set remote and push
@@ -379,11 +347,7 @@ async function run() {
 
 				if (pushResult.exitCode === 0) {
 					console.log('  ✅ Code pushed!')
-					const result = await configureGitHub(githubUser, repoName)
-					if (result && typeof result === 'object') {
-						githubConfigured = result.success
-						npmTokenConfigured = result.npmTokenConfigured
-					}
+					githubConfigured = await configureGitHub(githubUser, repoName)
 				} else {
 					console.log('  ⚠️  Could not push to GitHub')
 				}
@@ -428,24 +392,14 @@ async function run() {
 		stepNum++
 	}
 
-	// Only show NPM_TOKEN instructions if it wasn't auto-configured
-	if (!npmTokenConfigured) {
-		steps.push(`  ${stepNum}. For npm publishing (first time):`)
-		steps.push(`     gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`)
-		steps.push(
-			'     - After first publish, configure OIDC trusted publishing at:',
-		)
-		steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
-		stepNum++
-	} else {
-		steps.push(`  ${stepNum}. For npm publishing:`)
-		steps.push('     - NPM_TOKEN secret already configured!')
-		steps.push(
-			'     - After first publish, configure OIDC trusted publishing at:',
-		)
-		steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
-		stepNum++
-	}
+	// NPM_TOKEN must be configured manually per-repo
+	steps.push(`  ${stepNum}. For npm publishing (first time):`)
+	steps.push(`     gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`)
+	steps.push(
+		'     - After first publish, configure OIDC trusted publishing at:',
+	)
+	steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
+	stepNum++
 
 	steps.push(`  ${stepNum}. Start coding:`)
 	steps.push('     bun dev          # Watch mode')
