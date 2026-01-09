@@ -426,6 +426,11 @@ async function run() {
 
 	// NPM_TOKEN must be configured manually per-repo
 	steps.push(`  ${stepNum}. For npm publishing (first time):`)
+	steps.push('     # If you have NPM_TOKEN in your environment:')
+	steps.push(
+		`     echo "$NPM_TOKEN" | gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`,
+	)
+	steps.push('     # Or set it interactively:')
 	steps.push(`     gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`)
 	steps.push(
 		'     - After first publish, configure OIDC trusted publishing at:',
