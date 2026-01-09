@@ -53,7 +53,7 @@ jobs:
         run: bun run quality-check:ci
       - run: bun run build
       - name: Generate SBOM (CycloneDX JSON)
-        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+        uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # v0.21.1
         with:
           path: .
           format: cyclonedx-json
