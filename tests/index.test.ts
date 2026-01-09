@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { VERSION, greet } from '../src/index'
+import { greet, VERSION } from '../src/index'
 
 describe('greet', () => {
 	it('returns a greeting message', () => {
