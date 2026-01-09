@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Require dev-dependencies label
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         id: labels
         with:
           script: |
@@ -22,7 +22,7 @@ jobs:
               core.setFailed('PR is not labeled dev-dependencies; skipping auto-merge')
             }
       - name: Check changed files for devDependencies only
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         id: diff
         with:
           script: |
