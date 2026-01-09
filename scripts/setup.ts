@@ -142,7 +142,7 @@ async function run() {
 		// Update package.json to remove setup script
 		const pkg = JSON.parse(readFileSync('package.json', 'utf-8'))
 		delete pkg.scripts.setup
-		writeFileSync('package.json', JSON.stringify(pkg, null, '\t') + '\n')
+		writeFileSync('package.json', `${JSON.stringify(pkg, null, '\t')}\n`)
 	} catch {
 		// Ignore if can't delete
 	}
@@ -168,7 +168,7 @@ async function run() {
 	console.log('  3. For npm publishing (first time):')
 	console.log('     - Add NPM_TOKEN secret to GitHub repo settings')
 	console.log('     - After first publish, configure OIDC trusted publishing at:')
-	console.log('       https://www.npmjs.com/package/' + packageName + '/access\n')
+	console.log(`       https://www.npmjs.com/package/${packageName}/access\n`)
 	console.log('  4. Start coding:')
 	console.log('     bun dev          # Watch mode')
 	console.log('     bun test         # Run tests')
