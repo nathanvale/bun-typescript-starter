@@ -246,6 +246,9 @@ function closeReadline(): void {
 	}
 }
 
+/** Check if running in interactive mode (TTY available) */
+const isInteractive = process.stdin.isTTY ?? false
+
 /** Prompt for input if not provided via CLI */
 async function prompt(
 	message: string,
@@ -255,6 +258,17 @@ async function prompt(
 	// If CLI value provided, use it
 	if (cliValue !== undefined) {
 		return cliValue
+	}
+
+	// If not interactive (no TTY), use default value
+	if (!isInteractive) {
+		if (defaultValue === undefined) {
+			console.error(
+				`Error: --${message.split(' ')[0].toLowerCase()} is required in non-interactive mode`,
+			)
+			process.exit(1)
+		}
+		return defaultValue
 	}
 
 	// Otherwise prompt interactively
