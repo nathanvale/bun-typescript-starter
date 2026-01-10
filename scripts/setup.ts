@@ -1,12 +1,29 @@
 #!/usr/bin/env bun
 /**
- * Interactive setup script for bun-typescript-starter template.
+ * Setup script for bun-typescript-starter template.
  *
- * Run after cloning/creating from template:
+ * Supports both CLI arguments and interactive mode:
+ *
+ *   # Interactive mode (prompts for all values)
  *   bun run setup
  *
+ *   # CLI mode (no prompts, all flags required)
+ *   bun run setup --name @scope/my-lib --description "My library" --author "Name"
+ *
+ *   # Mixed mode (prompts for missing values)
+ *   bun run setup --name @scope/my-lib
+ *
+ * CLI Flags:
+ *   --name, -n        Package name (e.g., @yourscope/my-lib or my-lib)
+ *   --repo, -r        Repository name (defaults to package name without scope)
+ *   --user, -u        GitHub username/org (defaults to gh CLI user)
+ *   --description, -d Project description
+ *   --author, -a      Author name
+ *   --yes, -y         Skip confirmation prompts (auto-yes)
+ *   --no-github       Skip GitHub repo creation/configuration
+ *
  * This script:
- * 1. Prompts for project details
+ * 1. Prompts for project details (or uses CLI args)
  * 2. Replaces placeholders in config files
  * 3. Installs dependencies
  * 4. Creates initial commit
@@ -17,6 +34,50 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { parseArgs } from 'node:util'
+
+// Parse CLI arguments
+const { values: args } = parseArgs({
+	options: {
+		name: { type: 'string', short: 'n' },
+		repo: { type: 'string', short: 'r' },
+		user: { type: 'string', short: 'u' },
+		description: { type: 'string', short: 'd' },
+		author: { type: 'string', short: 'a' },
+		yes: { type: 'boolean', short: 'y', default: false },
+		'no-github': { type: 'boolean', default: false },
+		help: { type: 'boolean', short: 'h', default: false },
+	},
+	strict: true,
+	allowPositionals: false,
+})
+
+if (args.help) {
+	console.log(`
+Usage: bun run setup [options]
+
+Options:
+  -n, --name <name>         Package name (e.g., @yourscope/my-lib)
+  -r, --repo <name>         Repository name (defaults to package name)
+  -u, --user <name>         GitHub username/org
+  -d, --description <text>  Project description
+  -a, --author <name>       Author name
+  -y, --yes                 Skip confirmation prompts
+  --no-github               Skip GitHub repo creation
+  -h, --help                Show this help message
+
+Examples:
+  # Interactive mode
+  bun run setup
+
+  # Full CLI mode (no prompts)
+  bun run setup -n @nathanvale/my-lib -d "My library" -a "Nathan Vale" -y
+
+  # Partial CLI mode (prompts for missing values)
+  bun run setup --name my-lib
+`)
+	process.exit(0)
+}
 
 /** Check if GitHub CLI is installed and authenticated */
 function hasGitHubCLI(): boolean {
@@ -27,16 +88,41 @@ function hasGitHubCLI(): boolean {
 	return result.exitCode === 0
 }
 
+/** Get GitHub username from gh CLI */
+function getGitHubUser(): string {
+	try {
+		const result = Bun.spawnSync(['gh', 'api', 'user', '--jq', '.login'], {
+			stdout: 'pipe',
+			stderr: 'pipe',
+		})
+		if (result.exitCode === 0) {
+			return new TextDecoder().decode(result.stdout).trim()
+		}
+	} catch {
+		// Ignore
+	}
+	// Fallback to git config
+	try {
+		const result = Bun.spawnSync(['git', 'config', 'user.name'], {
+			stdout: 'pipe',
+			stderr: 'pipe',
+		})
+		return new TextDecoder().decode(result.stdout).trim()
+	} catch {
+		return ''
+	}
+}
+
 /** Run a gh CLI command and return success status */
-function runGh(args: string[], silent = false): boolean {
-	const result = Bun.spawnSync(['gh', ...args], {
+function runGh(ghArgs: string[], silent = false): boolean {
+	const result = Bun.spawnSync(['gh', ...ghArgs], {
 		stdout: silent ? 'pipe' : 'inherit',
 		stderr: silent ? 'pipe' : 'inherit',
 	})
 	return result.exitCode === 0
 }
 
-/** Configure GitHub repository settings to match Chatline standards */
+/** Configure GitHub repository settings */
 async function configureGitHub(
 	githubUser: string,
 	repoName: string,
@@ -44,7 +130,23 @@ async function configureGitHub(
 	const repo = `${githubUser}/${repoName}`
 	console.log('\n🔧 Configuring GitHub repository...\n')
 
-	// 1. Configure repo settings (squash merge only, delete branch on merge, auto-merge)
+	// 1. Enable workflow permissions to create PRs
+	console.log('  Enabling workflow permissions...')
+	runGh(
+		[
+			'api',
+			`repos/${repo}/actions/permissions/workflow`,
+			'--method',
+			'PUT',
+			'-f',
+			'default_workflow_permissions=write',
+			'-F',
+			'can_approve_pull_request_reviews=true',
+		],
+		true,
+	)
+
+	// 2. Configure repo settings (squash merge only, delete branch on merge, auto-merge)
 	console.log('  Setting merge options (squash only, auto-delete branches)...')
 	const repoSettings = runGh(
 		[
@@ -69,10 +171,9 @@ async function configureGitHub(
 		console.log('  ⚠️  Could not configure repo settings')
 	}
 
-	// 2. Configure branch protection for main
+	// 3. Configure branch protection for main
 	console.log('  Setting branch protection rules...')
 
-	// The protection rules need to be sent as JSON input
 	const protectionPayload = JSON.stringify({
 		required_status_checks: {
 			strict: true,
@@ -90,7 +191,6 @@ async function configureGitHub(
 		allow_deletions: false,
 	})
 
-	// Run with stdin input for JSON payload
 	const protectionResult = Bun.spawnSync(
 		[
 			'gh',
@@ -119,7 +219,6 @@ async function configureGitHub(
 			return false
 		}
 		console.log('  ⚠️  Could not configure branch protection')
-		console.log(`     ${stderr}`)
 		return false
 	}
 
@@ -127,20 +226,58 @@ async function configureGitHub(
 	return true
 }
 
-const rl = createInterface({
-	input: process.stdin,
-	output: process.stdout,
-})
+// Readline interface for interactive prompts
+let rl: ReturnType<typeof createInterface> | null = null
 
-function question(prompt: string, defaultValue?: string): Promise<string> {
+function getReadline(): ReturnType<typeof createInterface> {
+	if (!rl) {
+		rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		})
+	}
+	return rl
+}
+
+function closeReadline(): void {
+	if (rl) {
+		rl.close()
+		rl = null
+	}
+}
+
+/** Prompt for input if not provided via CLI */
+async function prompt(
+	message: string,
+	defaultValue?: string,
+	cliValue?: string,
+): Promise<string> {
+	// If CLI value provided, use it
+	if (cliValue !== undefined) {
+		return cliValue
+	}
+
+	// Otherwise prompt interactively
 	const displayPrompt = defaultValue
-		? `${prompt} [${defaultValue}]: `
-		: `${prompt}: `
+		? `${message} [${defaultValue}]: `
+		: `${message}: `
+
 	return new Promise((resolve) => {
-		rl.question(displayPrompt, (answer) => {
+		getReadline().question(displayPrompt, (answer) => {
 			resolve(answer.trim() || defaultValue || '')
 		})
 	})
+}
+
+/** Prompt for yes/no confirmation */
+async function confirm(message: string, defaultYes = true): Promise<boolean> {
+	if (args.yes) {
+		return true
+	}
+
+	const hint = defaultYes ? '(Y/n)' : '(y/N)'
+	const answer = await prompt(`${message} ${hint}`, defaultYes ? 'y' : 'n')
+	return answer.toLowerCase() === 'y'
 }
 
 function replaceInFile(
@@ -162,76 +299,59 @@ function replaceInFile(
 
 async function run() {
 	console.log('\n🚀 bun-typescript-starter Setup\n')
-	console.log('This script will configure your project.\n')
 
 	// Check if already configured
 	const packageJson = JSON.parse(readFileSync('package.json', 'utf-8'))
 	if (!packageJson.name.includes('{{')) {
 		console.log('⚠️  Project appears to already be configured.')
-		const proceed = await question('Continue anyway? (y/N)', 'n')
-		if (proceed.toLowerCase() !== 'y') {
+		if (!(await confirm('Continue anyway?', false))) {
 			console.log('Setup cancelled.')
-			rl.close()
+			closeReadline()
 			process.exit(0)
 		}
 	}
 
-	// Gather information
+	// Gather information (CLI args or interactive prompts)
+	const detectedUser = getGitHubUser()
+
 	console.log('📝 Project Details\n')
 
-	const packageName = await question(
+	const packageName = await prompt(
 		'Package name (e.g., @yourscope/my-lib or my-lib)',
 		'my-lib',
+		args.name,
 	)
 
-	// Extract repo name from package name
 	const defaultRepoName = packageName.startsWith('@')
 		? packageName.split('/')[1] || 'my-lib'
 		: packageName
-	const repoName = await question('Repository name', defaultRepoName)
 
-	// Try to detect GitHub username from gh CLI first, fallback to git config
-	let defaultGithubUser = ''
-	try {
-		// Prefer gh CLI for actual GitHub username
-		const ghResult = Bun.spawnSync(['gh', 'api', 'user', '--jq', '.login'], {
-			stdout: 'pipe',
-			stderr: 'pipe',
-		})
-		if (ghResult.exitCode === 0) {
-			defaultGithubUser = new TextDecoder().decode(ghResult.stdout).trim()
-		}
-	} catch {
-		// Ignore
-	}
-	// Fallback to git config user.name if gh didn't work
-	if (!defaultGithubUser) {
-		try {
-			const result = Bun.spawnSync(['git', 'config', 'user.name'])
-			defaultGithubUser = new TextDecoder().decode(result.stdout).trim()
-		} catch {
-			// Ignore
-		}
-	}
-	const githubUser = await question('GitHub username/org', defaultGithubUser)
+	const repoName = await prompt('Repository name', defaultRepoName, args.repo)
 
-	const description = await question(
-		'Project description',
-		'A TypeScript library',
+	const githubUser = await prompt(
+		'GitHub username/org',
+		detectedUser,
+		args.user,
 	)
 
-	const author = await question('Author name', defaultGithubUser)
+	const description = await prompt(
+		'Project description',
+		'A TypeScript library',
+		args.description,
+	)
 
+	const author = await prompt('Author name', detectedUser, args.author)
+
+	// Show summary and confirm
 	console.log('\n📋 Configuration Summary:\n')
 	console.log(`  Package name: ${packageName}`)
 	console.log(`  Repository:   ${githubUser}/${repoName}`)
 	console.log(`  Description:  ${description}`)
 	console.log(`  Author:       ${author}`)
 
-	const confirm = await question('\nProceed with setup? (Y/n)', 'y')
-	if (confirm.toLowerCase() === 'n') {
+	if (!(await confirm('\nProceed with setup?', true))) {
 		console.log('Setup cancelled.')
-		rl.close()
+		closeReadline()
 		process.exit(0)
 	}
 
@@ -258,7 +378,7 @@ async function run() {
 
 	if (installResult.exitCode !== 0) {
 		console.error('❌ Failed to install dependencies')
-		rl.close()
+		closeReadline()
 		process.exit(1)
 	}
 
@@ -281,23 +401,21 @@ async function run() {
 	}
 
 	// Create initial commit
-	const createCommit = await question('\nCreate initial commit? (Y/n)', 'y')
-	if (createCommit.toLowerCase() !== 'n') {
+	if (await confirm('\nCreate initial commit?', true)) {
 		Bun.spawnSync(['git', 'add', '.'], { stdout: 'inherit' })
 		Bun.spawnSync(['git', 'commit', '-m', 'chore: initial project setup'], {
 			stdout: 'inherit',
+			env: { ...process.env, HUSKY: '0' },
 		})
 		console.log('  Created initial commit')
 	}
 
 	// GitHub setup (optional - requires gh CLI)
 	let githubConfigured = false
-	if (hasGitHubCLI()) {
-		const setupGitHub = await question(
-			'\nCreate GitHub repo and configure settings? (Y/n)',
-			'y',
-		)
-		if (setupGitHub.toLowerCase() !== 'n') {
+	const skipGitHub = args['no-github']
+
+	if (!skipGitHub && hasGitHubCLI()) {
+		if (await confirm('\nCreate GitHub repo and configure settings?', true)) {
 			console.log('\n🌐 Setting up GitHub repository...\n')
 
 			// Check if repo already exists
@@ -331,7 +449,6 @@ async function run() {
 					{
 						stdout: 'inherit',
 						stderr: 'inherit',
-						// Allow push to main during initial setup (bypasses husky pre-push hook)
 						env: { ...process.env, ALLOW_PUSH_PROTECTED: '1' },
 					},
 				)
@@ -341,38 +458,30 @@ async function run() {
 					console.log('     You can create it manually and push later.')
 				} else {
 					console.log('  ✅ Repository created and code pushed!')
-					// Now configure the repo settings and branch protection
 					githubConfigured = await configureGitHub(githubUser, repoName)
 				}
 			} else {
 				// Repo exists, just set remote and push
 				console.log('  Repository already exists, pushing code...')
 
-				// Check if origin remote exists
-				const remoteResult = Bun.spawnSync(
-					['git', 'remote', 'get-url', 'origin'],
-					{
-						stdout: 'pipe',
-						stderr: 'pipe',
-					},
-				)
-
-				if (remoteResult.exitCode !== 0) {
-					Bun.spawnSync([
-						'git',
-						'remote',
-						'add',
-						'origin',
-						`git@github.com:${githubUser}/${repoName}.git`,
-					])
-				}
+				// Update origin to point to the correct repo
+				Bun.spawnSync(['git', 'remote', 'remove', 'origin'], {
+					stdout: 'pipe',
+					stderr: 'pipe',
+				})
+				Bun.spawnSync([
+					'git',
+					'remote',
+					'add',
+					'origin',
+					`git@github.com:${githubUser}/${repoName}.git`,
+				])
 
 				const pushResult = Bun.spawnSync(
-					['git', 'push', '-u', 'origin', 'main'],
+					['git', 'push', '-u', 'origin', 'main', '--force'],
 					{
 						stdout: 'inherit',
 						stderr: 'inherit',
-						// Allow push to main during initial setup (bypasses husky pre-push hook)
 						env: { ...process.env, ALLOW_PUSH_PROTECTED: '1' },
 					},
 				)
@@ -385,7 +494,7 @@ async function run() {
 				}
 			}
 		}
-	} else {
+	} else if (!skipGitHub) {
 		console.log(
 			'\n💡 Tip: Install GitHub CLI (gh) to auto-configure repo settings',
 		)
@@ -446,11 +555,11 @@ async function run() {
 	console.log('📋 Next steps:\n')
 	console.log(steps.join('\n'))
 
-	rl.close()
+	closeReadline()
 }
 
 run().catch((error) => {
 	console.error('Setup failed:', error)
-	rl.close()
+	closeReadline()
 	process.exit(1)
 })
