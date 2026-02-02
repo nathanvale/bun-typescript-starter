@@ -39,6 +39,7 @@ jobs:
               'pnpm-lock.yaml',
               'package-lock.json',
               'yarn.lock',
+              'bun.lock',
             ]
             const onlyAllowed = filenames.every(f => allowed.includes(f))
             if (!onlyAllowed) {
