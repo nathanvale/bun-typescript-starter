@@ -383,7 +383,22 @@ async function run() {
 	replaceInFile('package.json', replacements)
 	replaceInFile(join('.changeset', 'config.json'), replacements)
 
-	// Install dependencies
+	// Remove this setup script (one-time use)
+	// NOTE: Must happen BEFORE bun install so the lockfile reflects the final
+	// package.json (without the "setup" script). Otherwise CI's --frozen-lockfile
+	// will detect a mismatch and fail.
+	console.log('\n🧹 Removing setup script (one-time use)...')
+	try {
+		unlinkSync('scripts/setup.ts')
+		// Update package.json to remove setup script
+		const pkg = JSON.parse(readFileSync('package.json', 'utf-8'))
+		delete pkg.scripts.setup
+		writeFileSync('package.json', `${JSON.stringify(pkg, null, '\t')}\n`)
+	} catch {
+		// Ignore if can't delete
+	}
+
+	// Install dependencies (after all package.json modifications are done)
 	console.log('\n📦 Installing dependencies...\n')
 	const installResult = Bun.spawnSync(['bun', 'install'], {
 		stdout: 'inherit',
@@ -400,18 +415,6 @@ async function run() {
 	console.log('\n🔧 Setting up git...\n')
 	if (!existsSync('.git')) {
 		Bun.spawnSync(['git', 'init'], { stdout: 'inherit' })
-	}
-
-	// Remove this setup script (one-time use)
-	console.log('  Removing setup script (one-time use)...')
-	try {
-		unlinkSync('scripts/setup.ts')
-		// Update package.json to remove setup script
-		const pkg = JSON.parse(readFileSync('package.json', 'utf-8'))
-		delete pkg.scripts.setup
-		writeFileSync('package.json', `${JSON.stringify(pkg, null, '\t')}\n`)
-	} catch {
-		// Ignore if can't delete
 	}
 
 	// Create initial commit
