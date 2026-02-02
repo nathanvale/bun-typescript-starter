@@ -566,7 +566,10 @@ async function run() {
 	steps.push(
 		'     # For scoped packages (@org/name), do the first publish locally:',
 	)
-	steps.push(`     npm publish --access public`)
+	steps.push('     npm publish --access public --no-provenance')
+	steps.push(
+		'     # --no-provenance required locally (only works in GitHub Actions)',
+	)
 	steps.push('     # CI can handle subsequent publishes via Changesets.')
 	steps.push('')
 	steps.push(
