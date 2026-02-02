@@ -552,16 +552,31 @@ async function run() {
 
 	// NPM_TOKEN must be configured manually per-repo
 	steps.push(`  ${stepNum}. For npm publishing (first time):`)
-	steps.push('     # If you have NPM_TOKEN in your environment:')
+	steps.push('     # Create a granular access token at:')
 	steps.push(
-		`     echo "$NPM_TOKEN" | gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`,
+		`     #   https://www.npmjs.com/settings/${githubUser}/tokens/granular-access-tokens/new`,
 	)
-	steps.push('     # Or set it interactively:')
+	steps.push(
+		'     #   Scope to your package/org, Read+Write, check "Bypass 2FA"',
+	)
+	steps.push('')
+	steps.push('     # Then set the secret (paste token when prompted):')
 	steps.push(`     gh secret set NPM_TOKEN --repo ${githubUser}/${repoName}`)
+	steps.push('')
 	steps.push(
-		'     - After first publish, configure OIDC trusted publishing at:',
+		'     # For scoped packages (@org/name), do the first publish locally:',
 	)
-	steps.push(`       https://www.npmjs.com/package/${packageName}/access\n`)
+	steps.push(`     npm publish --access public`)
+	steps.push('     # CI can handle subsequent publishes via Changesets.')
+	steps.push('')
+	steps.push(
+		'     # After first publish, configure OIDC trusted publishing at:',
+	)
+	steps.push(`     #   https://www.npmjs.com/package/${packageName}/settings`)
+	steps.push(
+		'     #   → Trusted Publisher → GitHub Actions → set repo + workflow',
+	)
+	steps.push('     #   Then remove NPM_TOKEN secret (OIDC handles auth)\n')
 	stepNum++
 
 	steps.push(`  ${stepNum}. Start coding:`)
