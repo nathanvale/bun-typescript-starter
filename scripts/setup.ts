@@ -548,6 +548,20 @@ async function run() {
 		steps.push('     - Enable "Automatically delete head branches"')
 		steps.push('     - Enable "Allow auto-merge"\n')
 		stepNum++
+
+		steps.push(
+			`  ${stepNum}. Enable workflow permissions (required for Changesets version PRs):`,
+		)
+		steps.push(
+			`     https://github.com/${githubUser}/${repoName}/settings/actions`,
+		)
+		steps.push(
+			'     - Under "Workflow permissions", select "Read and write permissions"',
+		)
+		steps.push(
+			'     - Check "Allow GitHub Actions to create and approve pull requests"\n',
+		)
+		stepNum++
 	}
 
 	// NPM_TOKEN must be configured manually per-repo
