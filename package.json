@@ -77,7 +77,7 @@
 		"test:watch": "bun test --watch",
 		"typecheck": "tsc -p tsconfig.eslint.json --noEmit",
 		"validate": "bun run lint && bun run typecheck && bun run build && TF_BUILD=true bun run test",
-		"version:gen": "changeset",
+		"version:gen": "bun run scripts/version-gen.ts",
 		"version:pre": "changeset version",
 		"watch:types": "tsc -p tsconfig.eslint.json --noEmit --watch"
 	},
