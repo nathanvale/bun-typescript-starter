@@ -38,17 +38,21 @@ if [[ -n "${NPM_TOKEN:-}" ]]; then
   # Fallback: use NPM_TOKEN (for bootstrap or if OIDC not configured)
   annotate notice "NPM_TOKEN detected; using token auth (fallback mode)."
 
+  # Determine which .npmrc to write to. setup-node sets NPM_CONFIG_USERCONFIG
+  # to a temp file that overrides ~/.npmrc, so we must write there if it exists.
+  NPMRC="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
   # Trap to ensure cleanup on exit
-  trap 'rm -f "$HOME/.npmrc"' EXIT
+  trap 'rm -f "$NPMRC"' EXIT
 
   # Authenticate npm for publish
   {
     echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-  } > "$HOME/.npmrc"
-  chmod 0600 "$HOME/.npmrc"
+  } > "$NPMRC"
+  chmod 0600 "$NPMRC"
 
   echo "::group::Configure npm auth"
-  echo "Wrote npm auth token to ~/.npmrc"
+  echo "Wrote npm auth token to ${NPMRC}"
   echo "::endgroup::"
 else
   # Primary: OIDC trusted publishing (no token needed)
