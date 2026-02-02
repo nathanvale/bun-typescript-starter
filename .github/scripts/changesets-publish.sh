@@ -57,6 +57,9 @@ else
   annotate notice "Ensure trusted publisher is configured at: npmjs.com → package Settings → Trusted Publisher"
 fi
 
+annotate notice "Building before publish..."
+bun run build
+
 annotate notice "Attempting publish via 'bun run release'."
 
 # Run the project's publish script (configured to call `changeset publish`)
