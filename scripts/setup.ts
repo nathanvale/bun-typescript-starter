@@ -575,7 +575,7 @@ async function run() {
 	steps.push(
 		'     # After first publish, configure OIDC trusted publishing at:',
 	)
-	steps.push(`     #   https://www.npmjs.com/package/${packageName}/settings`)
+	steps.push(`     #   https://www.npmjs.com/package/${packageName}/access`)
 	steps.push(
 		'     #   → Trusted Publisher → GitHub Actions → set repo + workflow',
 	)
