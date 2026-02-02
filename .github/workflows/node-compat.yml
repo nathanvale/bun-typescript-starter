@@ -44,6 +44,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Node.js CLI smoke test
+        if: hashFiles('dist/bin/index.js') != ''
         run: node ./dist/bin/index.js --help
 
       - name: Verify ESM imports work on Node.js

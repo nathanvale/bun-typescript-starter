@@ -264,7 +264,7 @@ async function prompt(
 	if (!isInteractive) {
 		if (defaultValue === undefined) {
 			console.error(
-				`Error: --${message.split(' ')[0].toLowerCase()} is required in non-interactive mode`,
+				`Error: --${(message.split(' ')[0] ?? '').toLowerCase()} is required in non-interactive mode`,
 			)
 			process.exit(1)
 		}
