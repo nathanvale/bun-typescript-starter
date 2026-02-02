@@ -73,10 +73,23 @@ jobs:
         if: steps.changesets.outputs.published == 'true'
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "Creating GitHub release for v${VERSION}"
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
-            --notes-file CHANGELOG.md \
-            --verify-tag
+          TAG="v${VERSION}"
+          echo "Creating GitHub release for ${TAG}"
+          # Create and push the tag if it doesn't already exist (idempotent for re-runs)
+          if ! git rev-parse "${TAG}" >/dev/null 2>&1; then
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          else
+            echo "Tag ${TAG} already exists, skipping tag creation"
+          fi
+          # Create release if it doesn't exist (idempotent for re-runs)
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --notes-file CHANGELOG.md \
+              --verify-tag
+          else
+            echo "Release ${TAG} already exists, skipping release creation"
+          fi
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

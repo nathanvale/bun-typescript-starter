@@ -166,14 +166,22 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           TAG="v${VERSION}"
           echo "Creating GitHub release for ${TAG}"
-          # Create and push the tag (Changesets doesn't create tags)
-          git tag "${TAG}"
-          git push origin "${TAG}"
-          # Create the release
-          gh release create "${TAG}" \
-            --title "${TAG}" \
-            --notes-file CHANGELOG.md \
-            --verify-tag
+          # Create and push the tag if it doesn't already exist (idempotent for re-runs)
+          if ! git rev-parse "${TAG}" >/dev/null 2>&1; then
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          else
+            echo "Tag ${TAG} already exists, skipping tag creation"
+          fi
+          # Create the release if it doesn't already exist (idempotent for re-runs)
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --notes-file CHANGELOG.md \
+              --verify-tag
+          else
+            echo "Release ${TAG} already exists, skipping release creation"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -270,15 +278,20 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           TAG="v${VERSION}"
           echo "Creating GitHub prerelease for ${TAG}"
-          # Create tag if it doesn't exist (changesets prerelease may not create tags)
+          # Create tag if it doesn't exist (idempotent for re-runs)
           if ! git rev-parse "${TAG}" >/dev/null 2>&1; then
             git tag "${TAG}"
             git push origin "${TAG}"
           fi
-          gh release create "${TAG}" \
-            --title "${TAG}" \
-            --notes "Prerelease version published to npm with tag: ${{ inputs.channel }}" \
-            --prerelease
+          # Create release if it doesn't exist (idempotent for re-runs)
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --notes "Prerelease version published to npm with tag: ${{ inputs.channel }}" \
+              --prerelease
+          else
+            echo "Release ${TAG} already exists, skipping release creation"
+          fi
 
       # ============================================================
       # Intent: snapshot (Canary snapshot)
