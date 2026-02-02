@@ -29,10 +29,39 @@ if printf '%s' "$LOWER" | grep -q 'breaking'; then TYPE="major"; fi
 SAFE_NAME=$(printf '%s' "$TITLE" | sed -E 's/[^[:alnum:][:space:]-]//g' | tr ' ' '-')
 FILE=".changeset/auto-${SAFE_NAME:-change}.md"
 
+# Discover package name(s) dynamically.
+# Supports both single-package repos and Bun workspaces (packages/*).
+PACKAGES=""
+if [[ -d "packages" ]]; then
+  # Monorepo: discover all publishable workspace packages
+  PACKAGES=$(node -e "
+    const fs = require('fs');
+    const path = require('path');
+    fs.readdirSync('packages', { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => path.join('packages', d.name, 'package.json'))
+      .filter(p => fs.existsSync(p))
+      .forEach(p => {
+        const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (!pkg.private) console.log(pkg.name);
+      });
+  ")
+else
+  # Single package: read name from root package.json
+  PACKAGES=$(node -p "require('./package.json').name")
+fi
+
+if [[ -z "$PACKAGES" ]]; then
+  echo "::warning::Could not determine package name(s). Skipping changeset generation."
+  exit 0
+fi
+
 mkdir -p .changeset
 {
   printf '---\n'
-  printf 'imessage-timeline: %s\n' "$TYPE"
+  while IFS= read -r PKG; do
+    printf '"%s": %s\n' "$PKG" "$TYPE"
+  done <<< "$PACKAGES"
   printf '---\n\n'
   printf '%s\n' "$TITLE"
 } >"$FILE"
