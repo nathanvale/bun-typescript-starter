@@ -5,6 +5,7 @@ coverage/
 
 # Dependencies
 node_modules/
+.npm-changesets/
 # Bun linker artifacts (hoisted mode creates these in project root)
 # See: https://github.com/oven-sh/bun/issues/23615
 *@@@*/
