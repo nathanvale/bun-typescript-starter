@@ -138,8 +138,11 @@ This template uses **OIDC Trusted Publishing** for npm releases.
 |----------|---------|---------|
 | `pr-quality.yml` | PR | Lint, types, tests |
 | `publish.yml` | Push to main | Version & publish |
+| `autogenerate-changeset.yml` | PR | Auto-generate changeset if missing |
 | `commitlint.yml` | PR | Validate commit messages |
 | `security.yml` | Schedule/PR | CodeQL + Trivy scans |
+
+**GitHub App:** [Changeset Bot](https://github.com/apps/changeset-bot) — comments on PRs with changeset status (install per-repo)
 
 ---
 

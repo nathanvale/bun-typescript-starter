@@ -131,7 +131,17 @@ bun run setup -- \
   --yes
 ```
 
-### Step 3: Configure NPM Token
+### Step 3: Install Changeset Bot
+
+Install the [Changeset Bot](https://github.com/apps/changeset-bot) GitHub App on your repo. It comments on every PR with changeset status so you know at a glance whether version bumps are queued.
+
+1. Visit https://github.com/apps/changeset-bot
+2. Click **Install** and select your repository
+3. Grant the requested permissions (pull request read/write, contents read-only)
+
+> The bot works alongside the `autogenerate-changeset.yml` workflow — the bot comments instantly, and the workflow auto-generates a changeset file if one is missing.
+
+### Step 4: Configure NPM Token
 
 Before publishing, you need to add your npm token to GitHub secrets.
 
@@ -161,7 +171,7 @@ gh secret set NPM_TOKEN --repo myusername/my-lib
 # Paste your token when prompted
 ```
 
-### Step 4: Create Initial Release
+### Step 5: Create Initial Release
 
 Create a changeset describing your initial release:
 
@@ -188,7 +198,7 @@ git push -u origin feat/initial-release
 gh pr create --title "chore: add changeset for initial release" --body "Initial release"
 ```
 
-### Step 5: Merge and Publish
+### Step 6: Merge and Publish
 
 1. **Wait for CI checks** to pass on your PR
 2. **Merge the PR** - This triggers the changesets workflow
@@ -201,7 +211,7 @@ gh pr create --title "chore: add changeset for initial release" --body "Initial 
 npm view @myusername/my-lib
 ```
 
-### Step 6: Configure OIDC Trusted Publishing (Optional)
+### Step 7: Configure OIDC Trusted Publishing (Optional)
 
 After the first publish, you can enable token-free publishing via OIDC:
 
@@ -247,11 +257,18 @@ As of December 2024, npm has revoked all classic tokens. You must use **granular
 |----------|---------|---------|
 | `pr-quality.yml` | PR | Lint, Typecheck, Test with coverage |
 | `publish.yml` | Push to main | Auto-publish via Changesets |
+| `autogenerate-changeset.yml` | PR | Auto-generate changeset if missing |
 | `commitlint.yml` | PR | Enforce conventional commits |
 | `pr-title.yml` | PR | Validate PR title format |
 | `security.yml` | Push/Schedule | CodeQL + Trivy scanning |
 | `dependency-review.yml` | PR | Supply chain security |
 | `dependabot-auto-merge.yml` | Dependabot PR | Auto-merge patch updates |
+
+### GitHub Apps
+
+| App | Purpose |
+|-----|---------|
+| [Changeset Bot](https://github.com/apps/changeset-bot) | PR comments with changeset status |
 
 ### Scripts
 

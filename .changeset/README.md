@@ -72,6 +72,16 @@ Add JSON export format
    - Generate `CHANGELOG.md` entries
 5. Merge the "Version Packages" PR to publish
 
+## Changeset Bot
+
+The [Changeset Bot](https://github.com/apps/changeset-bot) GitHub App comments on every PR
+with changeset status. Install it on your repo for instant feedback:
+
+https://github.com/apps/changeset-bot
+
+The bot works alongside `autogenerate-changeset.yml` — the bot comments instantly with
+status, and the workflow auto-generates a changeset file if one is missing.
+
 ## More Information
 
 See [Changesets Documentation](https://github.com/changesets/changesets)
