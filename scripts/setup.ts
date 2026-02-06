@@ -177,7 +177,7 @@ async function configureGitHub(
 	const protectionPayload = JSON.stringify({
 		required_status_checks: {
 			strict: true,
-			contexts: ['All checks passed'],
+			contexts: ['All checks passed', 'CodeRabbit'],
 		},
 		enforce_admins: true,
 		required_pull_request_reviews: {
@@ -187,6 +187,7 @@ async function configureGitHub(
 		},
 		restrictions: null,
 		required_linear_history: true,
+		required_conversation_resolution: true,
 		allow_force_pushes: false,
 		allow_deletions: false,
 	})
@@ -538,7 +539,10 @@ async function run() {
 			`     https://github.com/${githubUser}/${repoName}/settings/branches`,
 		)
 		steps.push('     - Enable "Require pull request before merging"')
-		steps.push('     - Enable "Require status checks to pass"')
+		steps.push(
+			'     - Enable "Require status checks to pass" (add "All checks passed" + "CodeRabbit")',
+		)
+		steps.push('     - Enable "Require conversation resolution before merging"')
 		steps.push('     - Enable "Require linear history"\n')
 		stepNum++
 
