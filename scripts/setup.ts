@@ -171,59 +171,13 @@ async function configureGitHub(
 		console.log('  ⚠️  Could not configure repo settings')
 	}
 
-	// 3. Configure branch protection for main
-	console.log('  Setting branch protection rules...')
-
-	const protectionPayload = JSON.stringify({
-		required_status_checks: {
-			strict: true,
-			contexts: ['All checks passed', 'CodeRabbit'],
-		},
-		enforce_admins: true,
-		required_pull_request_reviews: {
-			dismiss_stale_reviews: true,
-			require_code_owner_reviews: false,
-			required_approving_review_count: 0,
-		},
-		restrictions: null,
-		required_linear_history: true,
-		required_conversation_resolution: true,
-		allow_force_pushes: false,
-		allow_deletions: false,
-	})
-
-	const protectionResult = Bun.spawnSync(
-		[
-			'gh',
-			'api',
-			`repos/${repo}/branches/main/protection`,
-			'--method',
-			'PUT',
-			'-H',
-			'Accept: application/vnd.github+json',
-			'--input',
-			'-',
-		],
-		{
-			stdin: new TextEncoder().encode(protectionPayload),
-			stdout: 'pipe',
-			stderr: 'pipe',
-		},
-	)
-
-	if (protectionResult.exitCode !== 0) {
-		const stderr = new TextDecoder().decode(protectionResult.stderr)
-		if (stderr.includes('Not Found')) {
-			console.log(
-				'  ⚠️  Branch protection requires pushing code first (main branch must exist)',
-			)
-			return false
-		}
-		console.log('  ⚠️  Could not configure branch protection')
-		return false
-	}
+	// Branch protection is deferred to `bun run setup:protect` so it doesn't
+	// block subsequent pushes during initial setup (see GitHub issue #44).
 
 	console.log('  ✅ GitHub repository configured!')
+	console.log(
+		'  💡 Run `bun run setup:protect` after your initial commits to enable branch protection.',
+	)
 	return true
 }
 
@@ -534,18 +488,6 @@ async function run() {
 		steps.push('     git push -u origin main\n')
 		stepNum++
 
-		steps.push(`  ${stepNum}. Configure branch protection:`)
-		steps.push(
-			`     https://github.com/${githubUser}/${repoName}/settings/branches`,
-		)
-		steps.push('     - Enable "Require pull request before merging"')
-		steps.push(
-			'     - Enable "Require status checks to pass" (add "All checks passed" + "CodeRabbit")',
-		)
-		steps.push('     - Enable "Require conversation resolution before merging"')
-		steps.push('     - Enable "Require linear history"\n')
-		stepNum++
-
 		steps.push(`  ${stepNum}. Configure repo settings:`)
 		steps.push(`     https://github.com/${githubUser}/${repoName}/settings`)
 		steps.push('     - Allow squash merging only')
@@ -567,6 +509,13 @@ async function run() {
 		)
 		stepNum++
 	}
+
+	// Branch protection is always a separate step now
+	steps.push(
+		`  ${stepNum}. Enable branch protection (after all initial commits):`,
+	)
+	steps.push('     bun run setup:protect\n')
+	stepNum++
 
 	// NPM_TOKEN must be configured manually per-repo
 	steps.push(`  ${stepNum}. For npm publishing (first time):`)

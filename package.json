@@ -71,6 +71,7 @@
 		"release:snapshot:canary": "changeset version --snapshot canary && changeset publish --tag canary",
 		"security:audit": "npm audit",
 		"setup": "bun scripts/setup.ts",
+		"setup:protect": "bun scripts/setup-protect.ts",
 		"test": "bun test --recursive",
 		"test:ci": "TF_BUILD=true bun test --recursive",
 		"test:coverage": "bun test --coverage",

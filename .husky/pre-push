@@ -11,3 +11,21 @@ if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
     exit 1
   fi
 fi
+
+# Remind users to enable branch protection (one-time, non-blocking).
+# Once verified, creates a marker file so it never checks again.
+MARKER=".husky/.protection-verified"
+if [ ! -f "$MARKER" ] && command -v gh >/dev/null 2>&1; then
+  repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
+  if [ -n "$repo" ]; then
+    if gh api "repos/$repo/branches/main/protection" >/dev/null 2>&1; then
+      mkdir -p .husky
+      touch "$MARKER"
+    else
+      echo ""
+      echo "WARNING: Branch protection is not enabled on main."
+      echo "Run 'bun run setup:protect' to enable it."
+      echo ""
+    fi
+  fi
+fi
