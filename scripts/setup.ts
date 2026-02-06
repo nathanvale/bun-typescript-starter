@@ -488,18 +488,6 @@ async function run() {
 		steps.push('     git push -u origin main\n')
 		stepNum++
 
-		steps.push(`  ${stepNum}. Configure branch protection:`)
-		steps.push(
-			`     https://github.com/${githubUser}/${repoName}/settings/branches`,
-		)
-		steps.push('     - Enable "Require pull request before merging"')
-		steps.push(
-			'     - Enable "Require status checks to pass" (add "All checks passed" + "CodeRabbit")',
-		)
-		steps.push('     - Enable "Require conversation resolution before merging"')
-		steps.push('     - Enable "Require linear history"\n')
-		stepNum++
-
 		steps.push(`  ${stepNum}. Configure repo settings:`)
 		steps.push(`     https://github.com/${githubUser}/${repoName}/settings`)
 		steps.push('     - Allow squash merging only')
