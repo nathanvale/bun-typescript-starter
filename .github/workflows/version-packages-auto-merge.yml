@@ -49,3 +49,21 @@ jobs:
               }
             `, { prId: pr.node_id })
             core.info('Auto-merge enabled for Version Packages PR')
+
+      # GITHUB_TOKEN PRs don't trigger workflows (GitHub anti-recursion).
+      # Dispatch pr-quality.yml using the App token so the required "All
+      # checks passed" gate job runs and branch protection is satisfied.
+      - name: Trigger PR quality checks on version branch
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const branch = context.payload.pull_request.head.ref
+            core.info(`Dispatching PR quality workflow on ${branch}`)
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'pr-quality.yml',
+              ref: branch,
+            })
+            core.info('PR quality workflow dispatched')
