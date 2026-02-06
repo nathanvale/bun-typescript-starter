@@ -13,7 +13,7 @@ count_changesets() {
   if [[ -d "$dir" ]]; then
     while IFS= read -r -d '' _file; do
       count=$((count + 1))
-    done < <(find "$dir" -type f -name '*.md' -print0 2>/dev/null)
+    done < <(find "$dir" -type f -name '*.md' -not -name 'README.md' -print0 2>/dev/null)
   fi
   printf '%d\n' "$count"
 }
