@@ -58,11 +58,11 @@ fi
 
 mkdir -p .changeset
 {
-  printf '---\n'
+  printf '%s\n' '---'
   while IFS= read -r PKG; do
     printf '"%s": %s\n' "$PKG" "$TYPE"
   done <<< "$PACKAGES"
-  printf '---\n\n'
+  printf '%s\n\n' '---'
   printf '%s\n' "$TITLE"
 } >"$FILE"
 
