@@ -18,14 +18,29 @@ MARKER=".husky/.protection-verified"
 if [ ! -f "$MARKER" ] && command -v gh >/dev/null 2>&1; then
   repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
   if [ -n "$repo" ]; then
-    if gh api "repos/$repo/branches/main/protection" >/dev/null 2>&1; then
-      mkdir -p .husky
-      touch "$MARKER"
-    else
-      echo ""
-      echo "WARNING: Branch protection is not enabled on main."
-      echo "Run 'bun run setup:protect' to enable it."
-      echo ""
-    fi
+    # Capture HTTP status to distinguish "not enabled" (404) from "no permission" (403).
+    http_status=$(gh api "repos/$repo/branches/main/protection" \
+      --silent --include 2>/dev/null \
+      | head -1 | awk '{print $2}') || true
+    case "${http_status:-}" in
+      200)
+        # Protection is enabled -- mark as verified.
+        mkdir -p .husky
+        touch "$MARKER"
+        ;;
+      404)
+        # Protection genuinely not configured.
+        echo ""
+        echo "WARNING: Branch protection is not enabled on main."
+        echo "Run 'bun run setup:protect' to enable it."
+        echo ""
+        ;;
+      403)
+        # User lacks admin access -- can't determine status, skip silently.
+        ;;
+      *)
+        # Network error or unexpected status -- skip silently.
+        ;;
+    esac
   fi
 fi
