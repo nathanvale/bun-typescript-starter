@@ -126,6 +126,30 @@ jobs:
           fi
 
       # ============================================================
+      # GitHub App Token (bypasses anti-recursion)
+      # ============================================================
+      # GITHUB_TOKEN commits don't trigger workflows (GitHub anti-recursion).
+      # The changesets action pushes to changeset-release/main which must
+      # trigger version-packages-auto-merge.yml. Using a GitHub App token
+      # ensures those pushes fire pull_request_target events.
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@8d0d610af187e78a2772c2d18d627f4c52d3fbfb # v3.1.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          GITHUB_APP_ID: op://API Credentials/chatline-changesets-bot/App ID
+          GITHUB_APP_PRIVATE_KEY: op://API Credentials/chatline-changesets-bot/credential
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ env.GITHUB_APP_ID }}
+          private-key: ${{ env.GITHUB_APP_PRIVATE_KEY }}
+
+      # ============================================================
       # Intent Computation
       # ============================================================
 
@@ -165,7 +189,7 @@ jobs:
           title: 'chore: version packages'
           commit: 'chore: version packages'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           HUSKY: 0
 
@@ -192,7 +216,7 @@ jobs:
             echo "Release ${TAG} already exists, skipping release creation"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       # ============================================================
       # Build & Git Config (for version/publish/snapshot)
@@ -215,7 +239,7 @@ jobs:
       - name: Version prerelease
         if: steps.intent.outputs.value == 'version'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           HUSKY: '0'
         run: |
           bun run version:pre
@@ -275,13 +299,13 @@ jobs:
         if: steps.intent.outputs.value == 'publish'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: bun run publish:pre
 
       - name: Create GitHub Release (Prerelease)
         if: steps.intent.outputs.value == 'publish'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           HUSKY: '0'
         run: |
           VERSION=$(node -p "require('./package.json').version")
@@ -310,5 +334,5 @@ jobs:
         if: steps.intent.outputs.value == 'snapshot'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: bun run release:snapshot:canary
