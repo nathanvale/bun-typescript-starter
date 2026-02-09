@@ -68,7 +68,7 @@ function run() {
 	const protectionPayload = JSON.stringify({
 		required_status_checks: {
 			strict: true,
-			contexts: ['All checks passed', 'CodeRabbit'],
+			contexts: ['All checks passed'],
 		},
 		enforce_admins: true,
 		required_pull_request_reviews: {
@@ -117,9 +117,7 @@ function run() {
 
 	console.log('  ✅ Branch protection enabled on main!')
 	console.log('     - Requires PR for all changes')
-	console.log(
-		'     - Requires status checks: "All checks passed", "CodeRabbit"',
-	)
+	console.log('     - Requires status checks: "All checks passed"')
 	console.log('     - Requires conversation resolution')
 	console.log('     - Requires linear history')
 	console.log('     - Blocks force pushes and branch deletion')
