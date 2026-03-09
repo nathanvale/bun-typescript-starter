@@ -12,6 +12,28 @@
 
 import { readFileSync } from 'node:fs'
 
+type BranchResponse = {
+	commit?: {
+		sha?: string
+	}
+}
+
+type CheckRunsResponse = {
+	check_runs?: Array<{
+		name?: string
+		app?: {
+			id?: number
+		}
+	}>
+}
+
+type RulesetSummary = {
+	id?: number
+	name?: string
+}
+
+const textDecoder = new TextDecoder()
+
 /** Check if GitHub CLI is installed and authenticated */
 function hasGitHubCLI(): boolean {
 	const result = Bun.spawnSync(['gh', 'auth', 'status'], {
@@ -19,6 +41,66 @@ function hasGitHubCLI(): boolean {
 		stderr: 'pipe',
 	})
 	return result.exitCode === 0
+}
+
+function decodeOutput(output: Uint8Array): string {
+	return textDecoder.decode(output).trim()
+}
+
+function runGitHubJson<T>(args: string[]): T | null {
+	const result = Bun.spawnSync(['gh', ...args], {
+		stdout: 'pipe',
+		stderr: 'pipe',
+	})
+	if (result.exitCode !== 0) {
+		return null
+	}
+
+	try {
+		return JSON.parse(decodeOutput(result.stdout)) as T
+	} catch {
+		return null
+	}
+}
+
+function runGitHubWithJsonInput(
+	args: string[],
+	payload: unknown,
+): { ok: boolean; stderr: string } {
+	const result = Bun.spawnSync(['gh', ...args, '--input', '-'], {
+		stdin: new TextEncoder().encode(JSON.stringify(payload)),
+		stdout: 'pipe',
+		stderr: 'pipe',
+	})
+	return {
+		ok: result.exitCode === 0,
+		stderr: decodeOutput(result.stderr),
+	}
+}
+
+function deleteRuleset(
+	repo: string,
+	id: number,
+): { ok: boolean; stderr: string } {
+	const result = Bun.spawnSync(
+		[
+			'gh',
+			'api',
+			`repos/${repo}/rulesets/${id}`,
+			'--method',
+			'DELETE',
+			'-H',
+			'Accept: application/vnd.github+json',
+		],
+		{
+			stdout: 'pipe',
+			stderr: 'pipe',
+		},
+	)
+	return {
+		ok: result.exitCode === 0,
+		stderr: decodeOutput(result.stderr),
+	}
 }
 
 /** Detect repo owner/name from git remote or package.json */
@@ -29,7 +111,7 @@ function detectRepo(): string | null {
 		{ stdout: 'pipe', stderr: 'pipe' },
 	)
 	if (result.exitCode === 0) {
-		return new TextDecoder().decode(result.stdout).trim()
+		return decodeOutput(result.stdout)
 	}
 
 	// Fallback: parse from package.json repository URL
@@ -43,6 +125,65 @@ function detectRepo(): string | null {
 	}
 
 	return null
+}
+
+/**
+ * Pin the required check to the GitHub App that currently emits the gate.
+ *
+ * This avoids the legacy `contexts`-only configuration that can leave PRs
+ * stuck in a blocked state even when all modern check runs have passed.
+ */
+function detectGateCheckAppId(repo: string): number | null {
+	const branch = runGitHubJson<BranchResponse>([
+		'api',
+		`repos/${repo}/branches/main`,
+	])
+	const sha = branch?.commit?.sha
+	if (!sha) {
+		return null
+	}
+
+	const checks = runGitHubJson<CheckRunsResponse>([
+		'api',
+		`repos/${repo}/commits/${sha}/check-runs`,
+	])
+	const gateCheck = checks?.check_runs?.find(
+		(check) => check.name === 'All checks passed',
+	)
+	return gateCheck?.app?.id ?? null
+}
+
+function upsertRuleset(repo: string, name: string, payload: unknown): void {
+	const existingRulesets =
+		runGitHubJson<RulesetSummary[]>(['api', `repos/${repo}/rulesets`]) ?? []
+	const existing = existingRulesets.find((ruleset) => ruleset.name === name)
+
+	if (existing?.id) {
+		const deletion = deleteRuleset(repo, existing.id)
+		if (!deletion.ok) {
+			console.error(`❌ Could not replace ruleset "${name}".`)
+			console.error(`   ${deletion.stderr}`)
+			process.exit(1)
+		}
+	}
+
+	const creation = runGitHubWithJsonInput(
+		[
+			'api',
+			`repos/${repo}/rulesets`,
+			'--method',
+			'POST',
+			'-H',
+			'Accept: application/vnd.github+json',
+		],
+		payload,
+	)
+
+	if (!creation.ok) {
+		console.error(`❌ Could not configure ruleset "${name}".`)
+		console.error(`   ${creation.stderr}`)
+		process.exit(1)
+	}
 }
 
 function run() {
@@ -63,12 +204,27 @@ function run() {
 	}
 
 	console.log(`  Repository: ${repo}`)
-	console.log('  Setting branch protection rules on main...\n')
+	console.log('  Setting branch protection and rulesets on main...\n')
+
+	const requiredCheckContexts = ['All checks passed', 'Sensitive path review']
+
+	const gateCheckAppId = detectGateCheckAppId(repo)
+	if (gateCheckAppId !== null) {
+		console.log(
+			`  Found "All checks passed" check provider (GitHub App ID ${gateCheckAppId}).`,
+		)
+	} else {
+		console.log(
+			'  No existing gate check found on main yet; allowing any app for the first bootstrap.',
+		)
+	}
 
 	const protectionPayload = JSON.stringify({
 		required_status_checks: {
 			strict: true,
-			contexts: ['All checks passed'],
+			// The full branch-protection endpoint still requires `contexts`.
+			// We apply fine-grained `checks` via the dedicated status-check endpoint below.
+			contexts: requiredCheckContexts,
 		},
 		enforce_admins: true,
 		required_pull_request_reviews: {
@@ -78,7 +234,9 @@ function run() {
 		},
 		restrictions: null,
 		required_linear_history: true,
-		required_conversation_resolution: true,
+		// Keep bot-authored release PRs mergeable even if advisory review tools
+		// leave unresolved comments that humans have already triaged as noise.
+		required_conversation_resolution: false,
 		allow_force_pushes: false,
 		allow_deletions: false,
 	})
@@ -103,7 +261,7 @@ function run() {
 	)
 
 	if (protectionResult.exitCode !== 0) {
-		const stderr = new TextDecoder().decode(protectionResult.stderr)
+		const stderr = decodeOutput(protectionResult.stderr)
 		if (stderr.includes('Not Found')) {
 			console.error(
 				'❌ Main branch not found. Push at least one commit before enabling protection.',
@@ -115,12 +273,96 @@ function run() {
 		process.exit(1)
 	}
 
+	const statusChecksPayload = JSON.stringify({
+		strict: true,
+		checks: requiredCheckContexts.map((context) =>
+			gateCheckAppId !== null
+				? { context, app_id: gateCheckAppId }
+				: { context, app_id: -1 },
+		),
+	})
+
+	const statusChecksResult = Bun.spawnSync(
+		[
+			'gh',
+			'api',
+			`repos/${repo}/branches/main/protection/required_status_checks`,
+			'--method',
+			'PATCH',
+			'-H',
+			'Accept: application/vnd.github+json',
+			'--input',
+			'-',
+		],
+		{
+			stdin: new TextEncoder().encode(statusChecksPayload),
+			stdout: 'pipe',
+			stderr: 'pipe',
+		},
+	)
+
+	if (statusChecksResult.exitCode !== 0) {
+		const stderr = decodeOutput(statusChecksResult.stderr)
+		console.error('❌ Could not configure status check protection.')
+		console.error(`   ${stderr}`)
+		process.exit(1)
+	}
+
+	const branchRulesetPayload = {
+		name: 'Main branch governance',
+		target: 'branch',
+		enforcement: 'active',
+		conditions: {
+			ref_name: {
+				include: ['refs/heads/main'],
+				exclude: [],
+			},
+		},
+		rules: [
+			{
+				type: 'required_status_checks',
+				parameters: {
+					strict_required_status_checks_policy: true,
+					required_status_checks: requiredCheckContexts.map((context) =>
+						gateCheckAppId !== null
+							? { context, integration_id: gateCheckAppId }
+							: { context },
+					),
+				},
+			},
+			{ type: 'required_linear_history' },
+			{ type: 'deletion' },
+			{ type: 'non_fast_forward' },
+		],
+	}
+
+	const tagRulesetPayload = {
+		name: 'Release tag protection',
+		target: 'tag',
+		enforcement: 'active',
+		conditions: {
+			ref_name: {
+				include: ['refs/tags/v*'],
+				exclude: [],
+			},
+		},
+		rules: [{ type: 'update' }, { type: 'deletion' }],
+	}
+
+	upsertRuleset(repo, 'Main branch governance', branchRulesetPayload)
+	upsertRuleset(repo, 'Release tag protection', tagRulesetPayload)
+
 	console.log('  ✅ Branch protection enabled on main!')
 	console.log('     - Requires PR for all changes')
-	console.log('     - Requires status checks: "All checks passed"')
-	console.log('     - Requires conversation resolution')
+	console.log(
+		'     - Requires status checks: "All checks passed" + "Sensitive path review"',
+	)
+	console.log(
+		'     - Pins the gate to the current GitHub Actions check app when detected',
+	)
 	console.log('     - Requires linear history')
 	console.log('     - Blocks force pushes and branch deletion')
+	console.log('     - Adds repository rulesets for main and release tags')
 }
 
 run()

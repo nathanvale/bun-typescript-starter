@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Perform an alpha snapshot version and publish. Requires NPM_TOKEN and GITHUB_TOKEN in env.
+# Perform an alpha snapshot version and publish.
+#
+# Authentication modes:
+# 1. OIDC trusted publishing when NPM_TOKEN is absent
+# 2. NPM_TOKEN fallback for bootstrap or repos without trusted publishing
 
 set -euo pipefail
 
@@ -18,9 +22,8 @@ annotate() {
 	fi
 }
 
-if [[ -z "${NPM_TOKEN:-}" ]] || [[ -z "${GITHUB_TOKEN:-}" ]]; then
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
 	missing=()
-	[[ -z "${NPM_TOKEN:-}" ]] && missing+=("NPM_TOKEN")
 	[[ -z "${GITHUB_TOKEN:-}" ]] && missing+=("GITHUB_TOKEN")
 	annotate warning "Missing required secrets: ${missing[*]}. Skipping alpha snapshot publish."
 	exit 0
@@ -32,14 +35,18 @@ if [[ -f .changeset/pre.json ]]; then
 	exit 0
 fi
 
-# Trap to ensure cleanup on exit
-trap 'rm -f "$HOME/.npmrc"' EXIT
-
-# Authenticate npm for publish
-{
-	echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-} > "$HOME/.npmrc"
-chmod 0600 "$HOME/.npmrc"
+if [[ -n "${NPM_TOKEN:-}" ]]; then
+	NPMRC="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+	trap 'rm -f "$NPMRC"' EXIT
+	{
+		echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
+	} > "$NPMRC"
+	chmod 0600 "$NPMRC"
+	annotate notice "NPM_TOKEN detected; using token auth (fallback mode)."
+else
+	annotate notice "No NPM_TOKEN; relying on OIDC trusted publishing."
+	annotate notice "Ensure trusted publisher is configured at: npmjs.com → package Settings → Trusted Publisher"
+fi
 
 # Configure git identity and disable hooks for automation
 git config user.name 'github-actions[bot]'

@@ -36,6 +36,10 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { parseArgs } from 'node:util'
 
+type GitHubUserResponse = {
+	id?: number
+}
+
 // Parse CLI arguments
 const { values: args } = parseArgs({
 	options: {
@@ -122,17 +126,70 @@ function runGh(ghArgs: string[], silent = false): boolean {
 	return result.exitCode === 0
 }
 
+function runGhWithJsonInput(
+	ghArgs: string[],
+	payload: unknown,
+	silent = false,
+): boolean {
+	const result = Bun.spawnSync(['gh', ...ghArgs, '--input', '-'], {
+		stdin: new TextEncoder().encode(JSON.stringify(payload)),
+		stdout: silent ? 'pipe' : 'inherit',
+		stderr: silent ? 'pipe' : 'inherit',
+	})
+	return result.exitCode === 0
+}
+
+function getGitHubAuthenticatedUserId(): number | null {
+	try {
+		const result = Bun.spawnSync(['gh', 'api', 'user'], {
+			stdout: 'pipe',
+			stderr: 'pipe',
+		})
+		if (result.exitCode !== 0) return null
+		const user = JSON.parse(
+			new TextDecoder().decode(result.stdout),
+		) as GitHubUserResponse
+		return user.id ?? null
+	} catch {
+		return null
+	}
+}
+
+function ensureGitHubLabel(
+	repo: string,
+	name: string,
+	color: string,
+	description: string,
+): boolean {
+	return runGh(
+		[
+			'label',
+			'create',
+			name,
+			'--repo',
+			repo,
+			'--color',
+			color,
+			'--description',
+			description,
+			'--force',
+		],
+		true,
+	)
+}
+
 /** Configure GitHub repository settings */
 async function configureGitHub(
 	githubUser: string,
 	repoName: string,
 ): Promise<boolean> {
 	const repo = `${githubUser}/${repoName}`
+	const currentUserId = getGitHubAuthenticatedUserId()
 	console.log('\n🔧 Configuring GitHub repository...\n')
 
 	// 1. Enable workflow permissions to create PRs
 	console.log('  Enabling workflow permissions...')
-	runGh(
+	const workflowPermissionsConfigured = runGh(
 		[
 			'api',
 			`repos/${repo}/actions/permissions/workflow`,
@@ -145,6 +202,58 @@ async function configureGitHub(
 		],
 		true,
 	)
+	if (!workflowPermissionsConfigured) {
+		console.log('  ⚠️  Could not configure workflow permissions automatically')
+	}
+
+	console.log('  Hardening Actions policy (SHA pinning + selected actions)...')
+	const actionsPermissionsConfigured = runGh(
+		[
+			'api',
+			`repos/${repo}/actions/permissions`,
+			'--method',
+			'PUT',
+			'-f',
+			'enabled=true',
+			'-f',
+			'allowed_actions=selected',
+			'-F',
+			'sha_pinning_required=true',
+		],
+		true,
+	)
+	const selectedActionsConfigured = runGhWithJsonInput(
+		[
+			'api',
+			`repos/${repo}/actions/permissions/selected-actions`,
+			'--method',
+			'PUT',
+			'-H',
+			'Accept: application/vnd.github+json',
+		],
+		{
+			github_owned_allowed: true,
+			verified_allowed: false,
+			patterns_allowed: [
+				'step-security/harden-runner@*',
+				'dependabot/fetch-metadata@*',
+				'google/osv-scanner-action/osv-scanner-action@*',
+				'amannn/action-semantic-pull-request@*',
+				'anchore/sbom-action@*',
+				'softprops/action-gh-release@*',
+				'wagoid/commitlint-github-action@*',
+				'dorny/test-reporter@*',
+				'changesets/action@*',
+				'oven-sh/setup-bun@*',
+			],
+		},
+		true,
+	)
+	if (!actionsPermissionsConfigured || !selectedActionsConfigured) {
+		console.log(
+			'  ⚠️  Could not configure the GitHub Actions policy automatically',
+		)
+	}
 
 	// 2. Configure repo settings (squash merge only, delete branch on merge, auto-merge)
 	console.log('  Setting merge options (squash only, auto-delete branches)...')
@@ -169,6 +278,53 @@ async function configureGitHub(
 	)
 	if (!repoSettings) {
 		console.log('  ⚠️  Could not configure repo settings')
+	}
+
+	console.log('  Creating manual release environment...')
+	const environmentConfigured = runGhWithJsonInput(
+		[
+			'api',
+			`repos/${repo}/environments/manual-release`,
+			'--method',
+			'PUT',
+			'-H',
+			'Accept: application/vnd.github+json',
+		],
+		currentUserId !== null
+			? {
+					wait_timer: 0,
+					prevent_self_review: false,
+					reviewers: [{ type: 'User', id: currentUserId }],
+				}
+			: {
+					wait_timer: 0,
+					prevent_self_review: false,
+				},
+		true,
+	)
+	if (!environmentConfigured) {
+		console.log(
+			'  ⚠️  Could not create the manual release environment automatically',
+		)
+	}
+
+	console.log('  Seeding automation labels...')
+	const labelsConfigured = [
+		ensureGitHubLabel(
+			repo,
+			'dev-dependencies',
+			'0e8a16',
+			'Development dependency updates that are eligible for auto-merge',
+		),
+		ensureGitHubLabel(
+			repo,
+			'release:pre-toggle',
+			'5319e7',
+			'Automated prerelease mode toggle PRs',
+		),
+	].every(Boolean)
+	if (!labelsConfigured) {
+		console.log('  ⚠️  Could not seed one or more automation labels')
 	}
 
 	// Branch protection is deferred to `bun run setup:protect` so it doesn't
@@ -266,6 +422,26 @@ function replaceInFile(
 	console.log(`  Updated ${filePath}`)
 }
 
+function writeCodeownersFile(owner: string): void {
+	const filePath = join('.github', 'CODEOWNERS')
+	if (!existsSync(filePath)) {
+		return
+	}
+
+	const content = `# Sensitive automation paths default to the repo setup owner.
+# For organization repos, switch this to a real team like @your-org/platform.
+/.github/workflows/ @${owner}
+/.github/actions/ @${owner}
+/.github/scripts/ @${owner}
+/.changeset/config.json @${owner}
+/scripts/setup.ts @${owner}
+/scripts/setup-protect.ts @${owner}
+`
+
+	writeFileSync(filePath, content)
+	console.log(`  Updated ${filePath}`)
+}
+
 async function run() {
 	console.log('\n🚀 bun-typescript-starter Setup\n')
 
@@ -331,12 +507,14 @@ async function run() {
 		'{{PACKAGE_NAME}}': packageName,
 		'{{REPO_NAME}}': repoName,
 		'{{GITHUB_USER}}': githubUser,
+		'{{CODEOWNER}}': detectedUser || githubUser,
 		'{{DESCRIPTION}}': description,
 		'{{AUTHOR}}': author,
 	}
 
 	replaceInFile('package.json', replacements)
 	replaceInFile(join('.changeset', 'config.json'), replacements)
+	writeCodeownersFile(detectedUser || githubUser)
 
 	// Remove this setup script (one-time use)
 	// NOTE: Must happen BEFORE bun install so the lockfile reflects the final
@@ -375,11 +553,19 @@ async function run() {
 	// Create initial commit
 	if (await confirm('\nCreate initial commit?', true)) {
 		Bun.spawnSync(['git', 'add', '.'], { stdout: 'inherit' })
-		Bun.spawnSync(['git', 'commit', '-m', 'chore: initial project setup'], {
-			stdout: 'inherit',
-			env: { ...process.env, HUSKY: '0' },
-		})
-		console.log('  Created initial commit')
+		const commitResult = Bun.spawnSync(
+			['git', 'commit', '-m', 'chore: initial project setup'],
+			{
+				stdout: 'inherit',
+				stderr: 'inherit',
+				env: { ...process.env, HUSKY: '0' },
+			},
+		)
+		if (commitResult.exitCode === 0) {
+			console.log('  Created initial commit')
+		} else {
+			console.log('  ⚠️  Could not create initial commit automatically')
+		}
 	}
 
 	// GitHub setup (optional - requires gh CLI)
@@ -450,7 +636,7 @@ async function run() {
 				])
 
 				const pushResult = Bun.spawnSync(
-					['git', 'push', '-u', 'origin', 'main', '--force'],
+					['git', 'push', '-u', 'origin', 'main'],
 					{
 						stdout: 'inherit',
 						stderr: 'inherit',
@@ -508,18 +694,57 @@ async function run() {
 			'     - Check "Allow GitHub Actions to create and approve pull requests"\n',
 		)
 		stepNum++
+
+		steps.push(
+			`  ${stepNum}. Lock down the Actions policy (required for supply-chain hardening):`,
+		)
+		steps.push(
+			`     https://github.com/${githubUser}/${repoName}/settings/actions`,
+		)
+		steps.push(
+			'     - Require actions to be pinned to a full-length commit SHA',
+		)
+		steps.push(
+			'     - Allow GitHub-owned actions plus only the third-party actions used by this template\n',
+		)
+		stepNum++
 	}
+
+	steps.push(`  ${stepNum}. Configure a GitHub App for release automation:`)
+	steps.push('     - Create or reuse a GitHub App installed on this repo')
+	steps.push(
+		'     - Grant: Contents (read/write), Pull requests (read/write), Actions (read/write), Metadata (read-only)',
+	)
+	steps.push(
+		`     - Save the App ID as a repo variable: gh variable set APP_ID --body "<app-id>" --repo ${githubUser}/${repoName}`,
+	)
+	steps.push(
+		`     - Save the private key as a repo secret: gh secret set APP_PRIVATE_KEY --repo ${githubUser}/${repoName}\n`,
+	)
+	stepNum++
 
 	// Branch protection is always a separate step now
 	steps.push(
-		`  ${stepNum}. Enable branch protection (after all initial commits):`,
+		`  ${stepNum}. Enable branch protection and rulesets (after all initial commits):`,
 	)
 	steps.push('     bun run setup:protect\n')
 	stepNum++
 
-	// NPM_TOKEN must be configured manually per-repo
-	steps.push(`  ${stepNum}. For npm publishing (first time):`)
-	steps.push('     # Create a granular access token at:')
+	steps.push(`  ${stepNum}. Configure trusted publishing on npm:`)
+	steps.push('     # After the first package exists on npm, configure:')
+	steps.push(`     #   https://www.npmjs.com/package/${packageName}/access`)
+	steps.push(
+		'     #   → Trusted Publisher → GitHub Actions → set repo + workflow',
+	)
+	steps.push(
+		'     #   Then remove NPM_TOKEN and disallow token-based publishing\n',
+	)
+	stepNum++
+
+	steps.push(
+		`  ${stepNum}. If this is a brand-new package, bootstrap the first publish:`,
+	)
+	steps.push('     # Create a short-lived granular access token at:')
 	steps.push(
 		`     #   https://www.npmjs.com/settings/${githubUser}/tokens/granular-access-tokens/new`,
 	)
@@ -537,16 +762,9 @@ async function run() {
 	steps.push(
 		'     # --no-provenance required locally (only works in GitHub Actions)',
 	)
-	steps.push('     # CI can handle subsequent publishes via Changesets.')
-	steps.push('')
 	steps.push(
-		'     # After first publish, configure OIDC trusted publishing at:',
+		'     # CI can handle subsequent publishes via Changesets once OIDC is configured.\n',
 	)
-	steps.push(`     #   https://www.npmjs.com/package/${packageName}/access`)
-	steps.push(
-		'     #   → Trusted Publisher → GitHub Actions → set repo + workflow',
-	)
-	steps.push('     #   Then remove NPM_TOKEN secret (OIDC handles auth)\n')
 	stepNum++
 
 	steps.push(`  ${stepNum}. Start coding:`)

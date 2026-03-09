@@ -7,8 +7,14 @@ on:
   pull_request:
     paths:
       - 'package.json'
+      - 'bun.lock'
       - 'src/**'
+      - 'bunup.config.ts'
+      - 'README.md'
+      - 'LICENSE'
+      - 'CHANGELOG.md'
       - 'tsconfig.*'
+      - '.github/scripts/changesets-publish.sh'
       - '.github/workflows/package-hygiene.yml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
