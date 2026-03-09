@@ -35,7 +35,18 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
-            const title = context.payload.pull_request?.title || ''
+            const pr = context.payload.pull_request
+            if (!pr) {
+              core.info('No pull request context; nothing to enforce.')
+              return
+            }
+
+            if (pr.user?.type === 'Bot') {
+              core.info('Skipping title length check for bot-authored PR.')
+              return
+            }
+
+            const title = pr.title || ''
             const len = title.length
             if (len > 100) {
               const msg = `PR title is ${len} characters; limit is 100. Please shorten the title and move details to the PR body.`

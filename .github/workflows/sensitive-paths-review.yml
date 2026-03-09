@@ -72,11 +72,18 @@ jobs:
             }
 
             const labels = new Set((pr.labels || []).map((label) => label.name))
-            const isDependabotWorkflowBump =
-              pr.user.login === 'dependabot[bot]' &&
-              pr.head.repo.full_name === github.repository &&
-              labels.has('github_actions') &&
+            // Dependabot workflow PRs can be authored by either the classic bot
+            // account or the GitHub App-backed identity.
+            const isDependabotAuthor =
+              pr.user.login === 'dependabot[bot]' ||
+              pr.user.login === 'app/dependabot'
+            const onlyWorkflowFilesChanged =
+              files.length > 0 &&
               files.every((file) => file.filename.startsWith('.github/workflows/'))
+            const isDependabotWorkflowBump =
+              isDependabotAuthor &&
+              labels.has('github_actions') &&
+              onlyWorkflowFilesChanged
 
             if (isDependabotWorkflowBump) {
               core.info(
