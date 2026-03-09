@@ -66,6 +66,8 @@ jobs:
         id: prep
         uses: ./.github/actions/prepare-publish-workspace
         with:
+          app-id: ${{ vars.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
           setup-node: 'true'
           install-changesets-cli: 'true'
         env:
@@ -122,6 +124,9 @@ jobs:
       - name: Prepare release workspace
         id: prep
         uses: ./.github/actions/prepare-publish-workspace
+        with:
+          app-id: ${{ vars.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Validate pre-mode state
         run: |
@@ -182,6 +187,8 @@ jobs:
         id: prep
         uses: ./.github/actions/prepare-publish-workspace
         with:
+          app-id: ${{ vars.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
           setup-node: 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -260,6 +267,8 @@ jobs:
         id: prep
         uses: ./.github/actions/prepare-publish-workspace
         with:
+          app-id: ${{ vars.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
           setup-node: 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

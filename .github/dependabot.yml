@@ -6,11 +6,8 @@ updates:
       interval: 'weekly'
       day: 'sunday'
     open-pull-requests-limit: 10
-    allow:
-      - dependency-type: 'development'
     labels:
       - 'dependencies'
-      - 'dev-dependencies'
     commit-message:
       prefix: 'chore(deps)'
       include: 'scope'

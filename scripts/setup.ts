@@ -422,6 +422,26 @@ function replaceInFile(
 	console.log(`  Updated ${filePath}`)
 }
 
+function writeCodeownersFile(owner: string): void {
+	const filePath = join('.github', 'CODEOWNERS')
+	if (!existsSync(filePath)) {
+		return
+	}
+
+	const content = `# Sensitive automation paths default to the repo setup owner.
+# For organization repos, switch this to a real team like @your-org/platform.
+/.github/workflows/ @${owner}
+/.github/actions/ @${owner}
+/.github/scripts/ @${owner}
+/.changeset/config.json @${owner}
+/scripts/setup.ts @${owner}
+/scripts/setup-protect.ts @${owner}
+`
+
+	writeFileSync(filePath, content)
+	console.log(`  Updated ${filePath}`)
+}
+
 async function run() {
 	console.log('\n🚀 bun-typescript-starter Setup\n')
 
@@ -494,6 +514,7 @@ async function run() {
 
 	replaceInFile('package.json', replacements)
 	replaceInFile(join('.changeset', 'config.json'), replacements)
+	writeCodeownersFile(detectedUser || githubUser)
 
 	// Remove this setup script (one-time use)
 	// NOTE: Must happen BEFORE bun install so the lockfile reflects the final

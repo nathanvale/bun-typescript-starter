@@ -2,6 +2,12 @@ name: Prepare publish workspace
 description: Prepare a clean release workspace and mint the GitHub App token used by publish automation
 
 inputs:
+  app-id:
+    description: GitHub App ID used for release automation
+    required: true
+  app-private-key:
+    description: GitHub App private key used for release automation
+    required: true
   setup-node:
     description: Whether to install Node.js and configure the npm registry
     required: false
@@ -91,8 +97,8 @@ runs:
 
     - name: Validate GitHub App credentials
       env:
-        APP_ID: ${{ vars.APP_ID }}
-        APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.app-private-key }}
       shell: bash
       run: |
         if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
@@ -104,5 +110,5 @@ runs:
       id: app-token
       uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
       with:
-        app-id: ${{ vars.APP_ID }}
-        private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}

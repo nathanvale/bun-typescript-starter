@@ -68,18 +68,22 @@ jobs:
               per_page: 100,
             })
 
-            const latestReviewState = new Map()
+            const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
+            const latestReviewByLogin = new Map()
             for (const review of reviews) {
               const login = review.user?.login
               if (!login) continue
-              latestReviewState.set(login, review.state)
+              latestReviewByLogin.set(login, review)
             }
 
-            const hasHumanApproval = [...latestReviewState.entries()].some(
-              ([login, state]) =>
-                state === 'APPROVED' &&
-                login !== pr.user.login &&
-                !login.endsWith('[bot]'),
+            const hasHumanApproval = [...latestReviewByLogin.values()].some(
+              (review) =>
+                review.state === 'APPROVED' &&
+                trustedAssociations.has(review.author_association) &&
+                review.commit_id === pr.head.sha &&
+                review.user?.login &&
+                review.user.login !== pr.user.login &&
+                !review.user.login.endsWith('[bot]'),
             )
 
             if (!hasHumanApproval) {
