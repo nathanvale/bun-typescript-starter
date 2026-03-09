@@ -29,7 +29,9 @@ jobs:
         with:
           script: |
             const labels = (context.payload.pull_request.labels || []).map(l => l.name)
-            const allowed = ['dev-dependencies', 'github_actions']
+            // Accept both the legacy/general dependency label and the
+            // template-specific labels so existing repos keep flowing.
+            const allowed = ['dependencies', 'dev-dependencies', 'github_actions']
             const hasAllowed = labels.some(l => allowed.includes(l))
             if (!hasAllowed) {
               core.setFailed(`PR labels [${labels.join(', ')}] do not include any of: ${allowed.join(', ')}`)
@@ -86,10 +88,26 @@ jobs:
             })
             core.info(`Approved PR #${pr.number}`)
 
-            // Enable GitHub native auto-merge (waits for required checks)
-            await github.graphql(`
-              mutation($prId: ID!) {
-                enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) { clientMutationId }
+            const unstableStatus = 'Pull request Pull request is in unstable status'
+            for (let attempt = 1; attempt <= 18; attempt++) {
+              try {
+                // GitHub can reject this briefly while checks are still settling.
+                await github.graphql(`
+                  mutation($prId: ID!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) { clientMutationId }
+                  }
+                `, { prId: pr.node_id })
+                core.info(`Auto-merge enabled for PR #${pr.number}`)
+                return
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                if (!message.includes(unstableStatus) || attempt === 18) {
+                  throw error
+                }
+
+                core.info(
+                  `PR #${pr.number} is still unstable; retrying auto-merge enable in 10s (${attempt}/18).`,
+                )
+                await new Promise((resolve) => setTimeout(resolve, 10_000))
               }
-            `, { prId: pr.node_id })
-            core.info(`Auto-merge enabled for PR #${pr.number}`)
+            }
