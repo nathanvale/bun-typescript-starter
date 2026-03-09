@@ -50,12 +50,28 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const pr = context.payload.pull_request
-            const res = await github.graphql(`
-              mutation($prId: ID!) {
-                enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) { clientMutationId }
+            const unstableStatus = 'Pull request Pull request is in unstable status'
+            for (let attempt = 1; attempt <= 18; attempt++) {
+              try {
+                await github.graphql(`
+                  mutation($prId: ID!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) { clientMutationId }
+                  }
+                `, { prId: pr.node_id })
+                core.info('Auto-merge enabled for Version Packages PR')
+                return
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                if (!message.includes(unstableStatus) || attempt === 18) {
+                  throw error
+                }
+
+                core.info(
+                  `Version Packages PR is still unstable; retrying auto-merge enable in 10s (${attempt}/18).`,
+                )
+                await new Promise((resolve) => setTimeout(resolve, 10_000))
               }
-            `, { prId: pr.node_id })
-            core.info('Auto-merge enabled for Version Packages PR')
+            }
 
       # GITHUB_TOKEN PRs don't trigger workflows (GitHub anti-recursion).
       # Dispatch pr-quality.yml using the App token so the required "All
