@@ -5,18 +5,34 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'sunday'
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     labels:
       - 'dependencies'
+      - 'dev-dependencies'
     commit-message:
       prefix: 'chore(deps)'
       include: 'scope'
+    groups:
+      bun-dev-minor-and-patch:
+        dependency-type: development
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: 'weekly'
       day: 'sunday'
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     commit-message:
       prefix: 'chore(gha)'
       include: 'scope'
+    groups:
+      github-actions-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
