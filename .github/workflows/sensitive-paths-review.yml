@@ -61,6 +61,16 @@ jobs:
               return
             }
 
+            // In a user-owned template repo, the owner is the release authority.
+            // Keep the extra human-approval gate for bots/collaborators, but
+            // avoid forcing the owner to re-approve every iteration of their own PRs.
+            if (pr.user.login === context.repo.owner) {
+              core.info(
+                `Sensitive automation files changed (${touchedSensitive.join(', ')}); skipping extra approval gate for repository owner-authored PR.`,
+              )
+              return
+            }
+
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner: context.repo.owner,
               repo: context.repo.repo,
