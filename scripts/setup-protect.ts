@@ -221,7 +221,10 @@ function run() {
 
 	const protectionPayload = JSON.stringify({
 		required_status_checks: {
-			strict: true,
+			// Requiring branches to be up to date creates constant Dependabot
+			// churn in template-derived repos. We still require the gate checks,
+			// but let GitHub evaluate them on the PR head SHA instead.
+			strict: false,
 			// The full branch-protection endpoint still requires `contexts`.
 			// We apply fine-grained `checks` via the dedicated status-check endpoint below.
 			contexts: requiredCheckContexts,
