@@ -18,7 +18,7 @@ Modern TypeScript starter template with enterprise-grade tooling.
 
 - [Bun](https://bun.sh) installed (`curl -fsSL https://bun.sh/install | bash`)
 - [GitHub CLI](https://cli.github.com) installed and authenticated (`gh auth login`)
-- [npm account](https://www.npmjs.com) with a granular access token (see [NPM Token Setup](#npm-token-setup))
+- [npm account](https://www.npmjs.com) with package ownership or scope access
 
 ### Option A: GitHub CLI (Recommended)
 
@@ -100,10 +100,12 @@ bun run setup -- [options]
 4. **Creates GitHub repo** (if it doesn't exist) - Uses `gh repo create`
 5. **Configures GitHub settings**:
    - Enables workflow permissions for PR creation
+   - Locks GitHub Actions to SHA-pinned workflows plus the template allowlist
    - Sets squash-only merging
    - Enables auto-delete branches
    - Enables auto-merge
-   - Configures branch protection rules
+   - Seeds the `manual-release` environment
+   - Configures branch protection plus repository rulesets for the required gates
 
 ## Complete Setup Guide
 
@@ -141,9 +143,50 @@ Install the [Changeset Bot](https://github.com/apps/changeset-bot) GitHub App on
 
 > The bot works alongside the `autogenerate-changeset.yml` workflow — the bot comments instantly, and the workflow auto-generates a changeset file if one is missing.
 
-### Step 4: Configure NPM Token
+### Step 4: Configure GitHub App Credentials
 
-Before publishing, you need to add your npm token to GitHub secrets.
+The release and auto-merge workflows use a GitHub App token so bot-authored
+PRs can still trigger downstream workflows and enable native auto-merge.
+
+1. Create or reuse a GitHub App and install it on the repository.
+2. Grant these repository permissions:
+   - **Contents:** Read and write
+   - **Pull requests:** Read and write
+   - **Actions:** Read and write
+   - **Metadata:** Read-only
+3. Save the App ID as a repository variable:
+
+```bash
+gh variable set APP_ID --body "<app-id>" --repo myusername/my-lib
+```
+
+4. Save the private key PEM as a repository secret:
+
+```bash
+gh secret set APP_PRIVATE_KEY --repo myusername/my-lib
+```
+
+> Without these credentials, `publish.yml` and
+> `version-packages-auto-merge.yml` will fail early with a setup error instead
+> of silently creating release PRs that never progress.
+
+### Step 5: Configure npm Trusted Publishing
+
+This template is designed for npm trusted publishing via GitHub OIDC.
+For an existing npm package, configure that first and skip long-lived tokens.
+
+1. Go to [npmjs.com](https://www.npmjs.com) → Your Package → Settings → Publishing Access
+2. Click **Add Trusted Publisher**
+3. Configure:
+   - **Owner:** Your GitHub username/org
+   - **Repository:** Your repo name
+   - **Workflow file:** `publish.yml`
+4. Save changes
+
+### Step 6: Bootstrap the First Publish (Brand-New Packages Only)
+
+If the package does not exist on npm yet, bootstrap the first publish with a
+short-lived granular token, then remove it once trusted publishing is active.
 
 #### Create npm Granular Access Token
 
@@ -171,7 +214,7 @@ gh secret set NPM_TOKEN --repo myusername/my-lib
 # Paste your token when prompted
 ```
 
-### Step 5: Create Initial Release
+### Step 7: Create Initial Release
 
 Create a changeset describing your initial release:
 
@@ -198,12 +241,12 @@ git push -u origin feat/initial-release
 gh pr create --title "chore: add changeset for initial release" --body "Initial release"
 ```
 
-### Step 6: Merge and Publish
+### Step 8: Merge and Publish
 
 1. **Wait for CI checks** to pass on your PR
 2. **Merge the PR** - This triggers the changesets workflow
 3. **A "Version Packages" PR** will be automatically created
-4. **Merge the Version PR** - This triggers the publish workflow
+4. **The Version PR auto-merges once checks pass** - This triggers the publish workflow
 5. **Package is published to npm!**
 
 ```bash
@@ -211,26 +254,21 @@ gh pr create --title "chore: add changeset for initial release" --body "Initial 
 npm view @myusername/my-lib
 ```
 
-### Step 7: Configure OIDC Trusted Publishing (Optional)
+### Step 9: Remove the Bootstrap Token
 
-After the first publish, you can enable token-free publishing via OIDC:
+Once trusted publishing is active:
 
-1. Go to [npmjs.com](https://www.npmjs.com) → Your Package → Settings → Publishing Access
-2. Click "Add Trusted Publisher"
-3. Configure:
-   - **Owner:** Your GitHub username/org
-   - **Repository:** Your repo name
-   - **Workflow file:** `publish.yml`
-4. Save changes
-5. Optionally remove the `NPM_TOKEN` secret from GitHub
-
-Now future releases will publish automatically without any tokens!
+1. Remove the `NPM_TOKEN` secret from GitHub
+2. In npm package settings, disallow token-based publishing if your workflow allows it
+3. Keep the publish path OIDC-only for ongoing releases
 
 ## NPM Token Setup
 
 ### Why Granular Tokens?
 
-As of December 2024, npm has revoked all classic tokens. You must use **granular access tokens** for CI/CD publishing.
+Classic npm tokens are gone, and npm tightened token defaults again on
+September 29, 2025. Use **granular access tokens** only as a bootstrap fallback
+for brand-new packages, then move to trusted publishing.
 
 ### Token Requirements
 
@@ -239,15 +277,16 @@ As of December 2024, npm has revoked all classic tokens. You must use **granular
 | Type | Granular Access Token | Classic tokens no longer work |
 | Packages | All packages (for new) or specific | Allows publishing |
 | Permissions | Read and write | Required to publish |
-| **Bypass 2FA** | **Checked** | **Required for CI/CD** |
+| **Bypass 2FA** | **Checked** | **Required only for bootstrap token publishing** |
 
 ### Common Errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Access token expired or revoked" | Token doesn't have "Bypass 2FA" | Create new token with 2FA bypass |
+| "Access token expired or revoked" | Token doesn't have "Bypass 2FA" or has expired | Create a new short-lived bootstrap token with 2FA bypass |
 | "E404 Not Found" | Token doesn't have publish permissions | Check token has read/write access |
 | "E403 Forbidden" | Package scope mismatch | Ensure token covers your package scope |
+| OIDC publish denied | Trusted publisher not configured or repo/workflow mismatch | Re-check npm Trusted Publisher owner, repo, and `publish.yml` workflow |
 
 ## What's Included
 
@@ -257,10 +296,11 @@ As of December 2024, npm has revoked all classic tokens. You must use **granular
 |----------|---------|---------|
 | `pr-quality.yml` | PR | Lint, Typecheck, Test with coverage |
 | `publish.yml` | Push to main | Auto-publish via Changesets |
+| `sensitive-paths-review.yml` | PR + PR review | Requires human approval when automation paths change |
 | `autogenerate-changeset.yml` | PR | Auto-generate changeset if missing |
 | `commitlint.yml` | PR | Enforce conventional commits |
 | `pr-title.yml` | PR | Validate PR title format |
-| `security.yml` | Push/Schedule | CodeQL + Trivy scanning |
+| `security.yml` | Schedule/Manual | OSV vulnerability scanning |
 | `dependency-review.yml` | PR | Supply chain security |
 | `dependabot-auto-merge.yml` | Dependabot PR | Auto-merge patch updates |
 
@@ -269,6 +309,7 @@ As of December 2024, npm has revoked all classic tokens. You must use **granular
 | App | Purpose |
 |-----|---------|
 | [Changeset Bot](https://github.com/apps/changeset-bot) | PR comments with changeset status |
+| Your release automation app | Generates install tokens for `publish.yml` and `version-packages-auto-merge.yml` via `APP_ID` + `APP_PRIVATE_KEY` |
 
 ### Scripts
 
@@ -338,13 +379,19 @@ Configured in `biome.json`:
 
 ## Branch Protection
 
-The setup script automatically configures branch protection for `main`:
+The setup script automatically configures protection for `main` and release tags:
 
 - Require pull request before merging
-- Require status checks to pass ("All checks passed")
+- Require status checks to pass (`All checks passed` and `Sensitive path review`)
+- Pin required checks to the active GitHub Actions app when detected
 - Require linear history
 - No force pushes
 - No deletions
+- No required conversation resolution on `main` so bot-authored release PRs do not hang on advisory comments
+- Add a repository ruleset for `refs/heads/main`
+- Add a tag ruleset for immutable `v*` release tags
+- Seed a `manual-release` environment for manual prerelease/snapshot workflows
+- Lock GitHub Actions to SHA-pinned workflows plus the small allowlist used by this template
 
 If you need to manually configure it:
 
@@ -375,7 +422,19 @@ gh api repos/OWNER/REPO/actions/permissions/workflow \
 
 ### Version PR checks don't run
 
-Bot-created PRs don't trigger workflows. Push an empty commit:
+The template dispatches `pr-quality.yml` automatically from
+`version-packages-auto-merge.yml`, so you should not need to push an empty
+commit anymore.
+
+If a release PR still shows all check runs green but GitHub keeps it blocked,
+re-apply protection so the required gates are configured via the modern
+check-run API and repository rulesets instead of the legacy status-only path:
+
+```bash
+bun run setup:protect
+```
+
+As a temporary fallback for an already-stuck branch:
 
 ```bash
 git fetch origin
@@ -386,9 +445,10 @@ git push
 
 ### npm publish fails with 404
 
-1. Ensure your npm token has "Bypass 2FA" checked
-2. Ensure token has "Read and write" permissions
-3. Ensure token covers "All packages" (for new packages)
+1. If this is a bootstrap publish, ensure your granular token has "Bypass 2FA" checked
+2. Ensure the token has "Read and write" permissions
+3. Ensure the token covers "All packages" (for new packages)
+4. Once the package exists, switch to trusted publishing and remove the token
 
 ## License
 

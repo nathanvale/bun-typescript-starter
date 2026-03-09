@@ -4,6 +4,10 @@ on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, labeled]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
@@ -12,7 +16,9 @@ jobs:
   enable-automerge:
     if: |
       github.event.pull_request.title == 'chore: version packages' &&
-      github.event.pull_request.user.type == 'Bot'
+      github.event.pull_request.user.login == 'chatline-changesets-bot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'changeset-release/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -20,6 +26,16 @@ jobs:
         uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with:
           egress-policy: audit
+
+      - name: Validate GitHub App credentials
+        env:
+          APP_ID: ${{ vars.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+            echo "::error::Missing GitHub App credentials. Set repository variable APP_ID and secret APP_PRIVATE_KEY so version package PRs can dispatch checks and enable native auto-merge."
+            exit 1
+          fi
 
       - name: Generate GitHub App token
         id: app-token

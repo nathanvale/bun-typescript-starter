@@ -4,13 +4,19 @@ on:
   pull_request:
     types: [opened, synchronize, edited, reopened]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
   generate:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.title != 'chore: version packages'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -40,10 +46,32 @@ jobs:
         with:
           script: |
             const missing = '${{ steps.detect.outputs.found }}' === '0'
-            const body = missing ? 'Auto-generated a changeset for this PR.' : 'Changeset already present.'
+            const marker = '<!-- sq:auto-changeset -->'
+            const body = `${marker}\n${missing ? 'Auto-generated a changeset for this PR.' : 'Changeset already present.'}`
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              per_page: 100,
+            })
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.includes(marker)
+            )
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+              return
+            }
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body
+              body,
             })

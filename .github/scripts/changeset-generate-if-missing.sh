@@ -75,4 +75,4 @@ if [[ "${CI:-false}" == "true" ]]; then
   git config --global core.hooksPath /dev/null || true
 fi
 git commit -m "chore(changeset): auto-generate for PR #$PR_NUMBER" || echo 'No commit'
-git push || echo 'Push skipped'
+git push

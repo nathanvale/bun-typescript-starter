@@ -1,0 +1,94 @@
+name: Sensitive path review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  review-gate:
+    name: Sensitive path review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Require human approval for automation changes
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request
+            if (!pr) {
+              core.info('No pull request context; nothing to enforce.')
+              return
+            }
+
+            const sensitivePrefixes = [
+              '.github/workflows/',
+              '.github/actions/',
+              '.github/scripts/',
+            ]
+            const sensitiveFiles = new Set([
+              '.changeset/config.json',
+              'scripts/setup.ts',
+              'scripts/setup-protect.ts',
+            ])
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            })
+
+            const touchedSensitive = files
+              .map((file) => file.filename)
+              .filter((filename) =>
+                sensitiveFiles.has(filename) ||
+                sensitivePrefixes.some((prefix) => filename.startsWith(prefix)),
+              )
+
+            if (touchedSensitive.length === 0) {
+              core.info('No sensitive automation files changed.')
+              return
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            })
+
+            const latestReviewState = new Map()
+            for (const review of reviews) {
+              const login = review.user?.login
+              if (!login) continue
+              latestReviewState.set(login, review.state)
+            }
+
+            const hasHumanApproval = [...latestReviewState.entries()].some(
+              ([login, state]) =>
+                state === 'APPROVED' &&
+                login !== pr.user.login &&
+                !login.endsWith('[bot]'),
+            )
+
+            if (!hasHumanApproval) {
+              core.setFailed(
+                `Sensitive automation files changed (${touchedSensitive.join(', ')}). Require at least one human approval before merge.`,
+              )
+              return
+            }
+
+            core.info(
+              `Sensitive automation files changed (${touchedSensitive.join(', ')}); human approval detected.`,
+            )

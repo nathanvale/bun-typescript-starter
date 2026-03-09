@@ -12,6 +12,10 @@ on:
         required: true
         default: 'beta'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.action }}-${{ inputs.channel }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
@@ -40,6 +44,21 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+      - name: Validate GitHub App credentials
+        env:
+          APP_ID: ${{ vars.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+            echo "::error::Missing GitHub App credentials. Set repository variable APP_ID and secret APP_PRIVATE_KEY so pre-mode PRs are created with a token that can trigger downstream checks."
+            exit 1
+          fi
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - name: Create pre-mode toggle branch
         id: prep
         env:
@@ -56,9 +75,11 @@ jobs:
           ACTION: ${{ inputs.action }}
           CHANNEL: ${{ inputs.channel }}
         with:
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const title = `chore(pre): ${process.env.ACTION} ${process.env.CHANNEL} channel`
             const body = 'Automated Changesets pre-mode toggle PR.'
+            const label = 'release:pre-toggle'
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -68,10 +89,26 @@ jobs:
               body,
               maintainer_can_modify: true,
             })
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+              })
+            } catch (error) {
+              if (error.status !== 404) throw error
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '5319e7',
+                description: 'Automated prerelease mode toggle PRs',
+              })
+            }
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: pr.number,
-              labels: ['release:pre-toggle']
+              labels: [label]
             })
             core.info(`Opened PR #${pr.number} for pre-mode toggle`)

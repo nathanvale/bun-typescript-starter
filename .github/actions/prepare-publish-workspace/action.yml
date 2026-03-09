@@ -1,0 +1,108 @@
+name: Prepare publish workspace
+description: Prepare a clean release workspace and mint the GitHub App token used by publish automation
+
+inputs:
+  setup-node:
+    description: Whether to install Node.js and configure the npm registry
+    required: false
+    default: 'false'
+  install-changesets-cli:
+    description: Whether to install Changesets into a Node-resolvable prefix for changesets/action
+    required: false
+    default: 'false'
+
+outputs:
+  app-token:
+    description: GitHub App token for release automation
+    value: ${{ steps.app-token.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Harden Runner
+      uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+      with:
+        egress-policy: audit
+
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - name: Standard CI Env
+      uses: ./.github/actions/standard-ci-env
+
+    - name: Setup Bun
+      uses: ./.github/actions/setup-bun
+
+    - name: Setup Node for npm publish
+      if: inputs.setup-node == 'true'
+      uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+      with:
+        node-version: '24'
+        registry-url: 'https://registry.npmjs.org/'
+
+    - name: Install dependencies
+      run: bun install --frozen-lockfile
+      shell: bash
+
+    - name: Ensure changesets CLI is Node-resolvable
+      if: inputs.install-changesets-cli == 'true'
+      shell: bash
+      run: |
+        # The changesets/action uses Node.js require() internally.
+        # Bun's module layout uses .bun/ symlinks that the action's bundled JS
+        # runtime cannot resolve. npm install --no-save also fails because npm
+        # can't parse Bun's node_modules layout.
+        npm install --prefix .npm-changesets @changesets/cli @changesets/changelog-github
+        echo "NODE_PATH=$(pwd)/.npm-changesets/node_modules" >> "$GITHUB_ENV"
+
+    - name: Fix conflicting registry in bunfig.toml
+      if: inputs.setup-node == 'true'
+      shell: bash
+      run: |
+        if [ -f bunfig.toml ]; then
+          grep -v '^registry' bunfig.toml > bunfig.toml.tmp || true
+          mv bunfig.toml.tmp bunfig.toml
+        fi
+
+    - name: Clean Bun linker artifacts
+      shell: bash
+      run: |
+        find . -maxdepth 1 -type d -name '*@@@*' -exec rm -rf {} + 2>/dev/null || true
+        find . -maxdepth 1 -type d -regex '.*/[a-z].*@[0-9].*' -exec rm -rf {} + 2>/dev/null || true
+        rm -rf node_modules/.old_modules* 2>/dev/null || true
+
+    - name: Disable git hooks for CI commits
+      shell: bash
+      run: git config --global core.hooksPath /dev/null
+
+    - name: Publish readiness check
+      if: inputs.setup-node == 'true'
+      env:
+        NPM_TOKEN: ${{ env.NPM_TOKEN }}
+      shell: bash
+      run: |
+        echo "npm version: $(npm --version)"
+        if [ -z "${NPM_TOKEN:-}" ]; then
+          echo "::notice::No NPM_TOKEN; will use OIDC trusted publishing if configured."
+          echo "::notice::First publish for a brand-new package may still require a short-lived granular token."
+        else
+          echo "::notice::NPM_TOKEN detected; using token auth (bootstrap/fallback mode)."
+        fi
+
+    - name: Validate GitHub App credentials
+      env:
+        APP_ID: ${{ vars.APP_ID }}
+        APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      shell: bash
+      run: |
+        if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+          echo "::error::Missing GitHub App credentials. Set repository variable APP_ID and secret APP_PRIVATE_KEY so publish automation can open release PRs and enable auto-merge safely."
+          exit 1
+        fi
+
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+      with:
+        app-id: ${{ vars.APP_ID }}
+        private-key: ${{ secrets.APP_PRIVATE_KEY }}
