@@ -71,6 +71,20 @@ jobs:
               return
             }
 
+            const labels = new Set((pr.labels || []).map((label) => label.name))
+            const isDependabotWorkflowBump =
+              pr.user.login === 'dependabot[bot]' &&
+              pr.head.repo.full_name === github.repository &&
+              labels.has('github_actions') &&
+              files.every((file) => file.filename.startsWith('.github/workflows/'))
+
+            if (isDependabotWorkflowBump) {
+              core.info(
+                `Sensitive workflow files changed (${touchedSensitive.join(', ')}); skipping extra approval gate for safe Dependabot workflow update.`,
+              )
+              return
+            }
+
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner: context.repo.owner,
               repo: context.repo.repo,
