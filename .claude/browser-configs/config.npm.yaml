@@ -1,0 +1,23 @@
+# npm Browser Agent Configuration
+# Contains no secrets -- only vault item names, URLs, and flags.
+
+credentials:
+  provider: op
+  default_vault: "API Credentials"
+
+identity:
+  username: nathanvale
+  email: hi@nathanvale.com
+
+chrome:
+  binary_path: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  user_data_dir: ~/.cache/chrome-agent-npm
+  debug_port: 9226
+
+services:
+  npm:
+    url: https://www.npmjs.com
+    auth: password
+    op_item: "www.npmjs.com (nathanvale)"
+  npm_token:
+    op_item: NPM_TOKEN
