@@ -1,16 +1,16 @@
 ---
 name: setup-publishing
-description: Set up npm publishing for a bun-typescript-starter repo. Automates token creation, first publish, OIDC trusted publishing, and GitHub secrets via Chrome DevTools MCP. Use when a new repo needs publishing configured.
+description: Set up npm publishing for a bun-typescript-starter repo. Automates token creation, first publish, OIDC trusted publishing, and GitHub secrets via npm-browser-agent. Use when a new repo needs publishing configured.
 argument-hint: "[package-name]"
 ---
 
 # Setup Publishing
 
-Automate the full npm publishing setup for repos built on `nathanvale/bun-typescript-starter`. Uses Chrome DevTools MCP (`mcp__chrome-devtools__*`) for npm web UI steps that have no CLI equivalent.
+Automate the full npm publishing setup for repos built on `nathanvale/bun-typescript-starter`. Delegates browser automation to `npm-browser-agent` for npm web UI steps that have no CLI equivalent.
 
-**Why Chrome DevTools MCP?** npm uses Cloudflare bot protection that blocks headless browsers (agent-browser). Chrome DevTools MCP connects to the user's real Chrome session via CDP, bypassing bot detection and preserving passkey/fingerprint authentication.
+**Why npm-browser-agent?** npm uses Cloudflare bot protection that blocks headless browsers. The npm-browser-agent uses `agent-browser --cdp` to connect to a real Chrome instance via CDP (port 9226), bypassing bot detection. npm's passkey-only auth requires human-in-the-loop -- the agent detects auth prompts and returns `NEEDS_HUMAN` so you can authenticate with Touch ID.
 
-**Prerequisites:** The user must have Chrome open. The Chrome DevTools MCP server must be configured and running.
+**Prerequisites:** Chrome available on the system, `agent-browser` CLI installed (`bun install -g agent-browser@latest`).
 
 ## Phase 0: Select Target Repo
 
@@ -118,65 +118,47 @@ npm whoami
 
 If no token exists in 1Password, go to Phase 2 to create one.
 
-## Phase 2: Create Granular Access Token (Chrome DevTools MCP)
+## Phase 2: Create Granular Access Token (npm-browser-agent)
 
 This step requires the npm web UI -- there is no CLI equivalent for creating granular tokens.
 
 **Ask the user:** _"I need to create an npm granular access token. This requires browser automation to fill out the npm token form. Want me to proceed?"_
 
-If the user declines or Chrome DevTools MCP is unavailable, provide manual instructions (see Fallback section).
+If the user declines or `agent-browser` is unavailable, provide manual instructions (see Fallback section).
 
-### Browser Flow
+### Browser Task
 
-1. Navigate to the token creation page:
-   ```
-   mcp__chrome-devtools__navigate_page(type: "url", url: "https://www.npmjs.com/settings/nathanvale/tokens/granular-access-tokens/new")
-   ```
+Dispatch to `npm-browser-agent` with this task:
 
-2. Take a snapshot to check the page state:
-   ```
-   mcp__chrome-devtools__take_snapshot()
-   ```
+> Navigate to `https://www.npmjs.com/settings/nathanvale/tokens/granular-access-tokens/new`.
+> If auth is needed, follow npm-passkey-auth (will return NEEDS_HUMAN for passkey).
+> Once authenticated, fill the token creation form:
+> - **Token name**: `<repo-name>-publish` (e.g., `side-quest-core-publish`)
+> - **Expiration**: 90 days (max for write tokens)
+> - **Packages and scopes**: Select the package or org scope
+> - **Permissions**: Read and Write
+> - **Bypass 2FA**: Check this (prevents OTP prompts in CI)
+> Submit the form and capture the generated token value from the success page.
+> **IMPORTANT:** Do NOT take screenshots of pages showing tokens.
 
-3. **If login page appears:** Ask the user to log in manually in Chrome (fingerprint/passkey works here since it's their real browser). Then re-snapshot.
+**If agent returns `NEEDS_HUMAN`:** Relay the auth instructions to the user. Once they confirm login is complete, re-dispatch the agent to continue.
 
-4. **If 2FA page appears:** Ask the user to tap "Use security key" and authenticate with their fingerprint. Then re-snapshot.
+**If agent returns `SUCCESS` with the token:** Store it:
 
-5. Fill the form fields using uid refs from the snapshot:
-   - **Token name**: `<repo-name>-publish` (e.g., `side-quest-core-publish`)
-   - **Expiration**: 90 days (max for write tokens)
-   - **Packages and scopes**: Select the package or org scope
-   - **Permissions**: Read and Write
-   - **Bypass 2FA**: Check this (prevents OTP prompts in CI)
+```bash
+# Save to ~/.npmrc for local use
+echo "//registry.npmjs.org/:_authToken=<token>" > ~/.npmrc
+npm whoami  # Verify
 
-   ```
-   mcp__chrome-devtools__fill(uid: "<ref>", value: "<token-name>")
-   mcp__chrome-devtools__click(uid: "<ref>")  # Each dropdown/checkbox
-   ```
+# Set as GitHub secret for CI
+gh secret set NPM_TOKEN --repo <owner>/<repo> --body "<token>"
+```
 
-6. Submit and capture the token:
-   ```
-   mcp__chrome-devtools__click(uid: "<ref>")  # "Generate Token" button
-   mcp__chrome-devtools__take_snapshot()       # Token appears on next page
-   ```
-
-7. **IMPORTANT:** Do not take screenshots of pages showing tokens.
-
-8. Store the token:
-   ```bash
-   # Save to ~/.npmrc for local use
-   echo "//registry.npmjs.org/:_authToken=<token>" > ~/.npmrc
-   npm whoami  # Verify
-
-   # Set as GitHub secret for CI
-   gh secret set NPM_TOKEN --repo <owner>/<repo> --body "<token>"
-   ```
-
-9. Optionally save to 1Password:
-   ```bash
-   op item create --category=login --title="NPM_TOKEN" \
-     --vault="API Credentials" "credential=<token>"
-   ```
+Optionally save to 1Password:
+```bash
+op item create --category=login --title="NPM_TOKEN" \
+  --vault="API Credentials" "credential=<token>"
+```
 
 ## Phase 3: First Publish
 
@@ -206,62 +188,29 @@ Verify:
 npm view "$PACKAGE" version  # Should return the version you just published
 ```
 
-## Phase 4: Configure OIDC Trusted Publishing (Chrome DevTools MCP)
+## Phase 4: Configure OIDC Trusted Publishing (npm-browser-agent)
 
 After the package exists on npm, set up OIDC so CI never needs `NPM_TOKEN`.
 
 **Ask the user:** _"Package is published. I'll now configure OIDC trusted publishing via the npm website. Proceed?"_
 
-### Browser Flow
+### Browser Task
 
-1. Navigate to the package access page:
-   ```
-   PACKAGE=$(node -p "require('./package.json').name")
-   mcp__chrome-devtools__navigate_page(type: "url", url: "https://www.npmjs.com/package/${PACKAGE}/access")
-   ```
+Dispatch to `npm-browser-agent` with this task:
 
-2. Take a snapshot to check the page state:
-   ```
-   mcp__chrome-devtools__take_snapshot()
-   ```
+> Navigate to `https://www.npmjs.com/package/${PACKAGE}/access` (where `${PACKAGE}` is the package name from `package.json`).
+> If auth is needed, follow npm-passkey-auth (will return NEEDS_HUMAN for passkey).
+> Once authenticated:
+> 1. Find and click the **"GitHub Actions"** button under Trusted Publisher
+> 2. Fill the form with **exact values**:
+>    - **Organization or user**: `nathanvale` (GitHub username only -- NOT `nathanvale/repo-name`)
+>    - **Repository**: `<repo-name>` (GitHub repo name only -- NOT the npm package name)
+>    - **Workflow filename**: `publish.yml` (just the filename, not the full path)
+> 3. Click **"Set up new trusted publisher connection"**
+> 4. 2FA will be required -- return NEEDS_HUMAN for fingerprint auth
+> 5. After re-dispatch, verify success: look for `"Successfully added new Trusted Publisher connection."`
 
-3. **If login page appears:** Ask the user to log in in Chrome. Then re-snapshot.
-
-4. **If 2FA page appears:** Ask the user to authenticate with their fingerprint. Then re-snapshot.
-
-5. Find and click the **"GitHub Actions"** button under Trusted Publisher:
-   ```
-   mcp__chrome-devtools__click(uid: "<ref>")  # "Add Trusted Publisher connection for GitHub Actions"
-   ```
-
-6. Take a snapshot to get the form field uids:
-   ```
-   mcp__chrome-devtools__take_snapshot()
-   ```
-
-7. Fill the form with **exact values**:
-   - **Organization or user**: GitHub username only (e.g., `nathanvale`) -- NOT `nathanvale/repo-name`
-   - **Repository**: GitHub repo name only (e.g., `side-quest-runners`) -- NOT the npm package name
-   - **Workflow filename**: `publish.yml` -- just the filename, not the full path
-
-   ```
-   mcp__chrome-devtools__fill(uid: "<org-field-ref>", value: "nathanvale")
-   mcp__chrome-devtools__fill(uid: "<repo-field-ref>", value: "<repo-name>")
-   mcp__chrome-devtools__fill(uid: "<workflow-field-ref>", value: "publish.yml")
-   ```
-
-8. Click **"Set up new trusted publisher connection"**:
-   ```
-   mcp__chrome-devtools__click(uid: "<ref>")
-   ```
-
-9. **2FA will be required.** Ask the user to authenticate with their fingerprint in Chrome.
-
-10. Take a snapshot to verify success -- look for the success alert:
-    ```
-    mcp__chrome-devtools__take_snapshot()
-    ```
-    Expect to see: `"Successfully added new Trusted Publisher connection."`
+**If agent returns `NEEDS_HUMAN`:** Relay the auth/2FA instructions to the user. Once they confirm, re-dispatch the agent to continue.
 
 ## Phase 5: Clean Up
 
@@ -280,7 +229,7 @@ Verify the full pipeline works:
 
 ## Fallback: Manual Instructions
 
-If Chrome DevTools MCP is unavailable or the user prefers manual steps:
+If `agent-browser` is unavailable or the user prefers manual steps:
 
 ### Create Granular Token (Manual)
 
