@@ -24,7 +24,7 @@ jobs:
           egress-policy: audit
 
       - name: Require auto-mergeable label
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: labels
         with:
           script: |
@@ -38,7 +38,7 @@ jobs:
             }
 
       - name: Check changed files are safe to auto-merge
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         id: diff
         with:
           script: |
@@ -72,7 +72,7 @@ jobs:
 
       - name: Approve and enable auto-merge
         if: steps.diff.outcome == 'success' && steps.labels.outcome == 'success' && (steps.metadata.outputs.update-type == 'version-update:semver-minor' || steps.metadata.outputs.update-type == 'version-update:semver-patch')
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
